@@ -42,6 +42,7 @@ class CacheEntry:
     system_prompt: str = ""
     temperature: float = -1.0
     tags: list[str] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
     def is_expired(self) -> bool:
         """
@@ -82,6 +83,7 @@ class CacheEntry:
             "system_prompt": self.system_prompt,
             "temperature": self.temperature,
             "tags": list(self.tags or []),
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -119,4 +121,5 @@ class CacheEntry:
             system_prompt=data.get("system_prompt", ""),
             temperature=float(data.get("temperature", -1.0)),
             tags=list(data.get("tags") or []),
+            metadata=data.get("metadata") or {},
         )

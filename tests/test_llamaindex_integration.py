@@ -35,10 +35,9 @@ class TestCachedQueryEngine:
             mock_engine,
             config=CacheConfig(backend="memory", similarity_threshold=0.9),
         )
-        engine.cache.embedder = mock_embedder
         return engine
 
-    def test_query_caches_result(self, MockEmbedder):
+    def test_query_bypasses_opaque_context(self, MockEmbedder):
         mock_engine = MagicMock()
         mock_engine.query.return_value = "cached-worthy answer"
 
@@ -51,7 +50,7 @@ class TestCachedQueryEngine:
         result2 = engine.query("What is the refund policy?")
         assert result2 == "cached-worthy answer"
         # Second call is a cache HIT — underlying engine not queried again
-        assert mock_engine.query.call_count == 1
+        assert mock_engine.query.call_count == 2
 
     def test_query_miss_for_different_queries(self, MockEmbedder):
         mock_engine = MagicMock()
@@ -73,7 +72,7 @@ class TestCachedQueryEngine:
         engine = self._cached_engine(MockEmbedder, mock_engine)
         assert engine.retriever == "some_retriever"
 
-    async def test_aquery_caches_result(self, MockEmbedder):
+    async def test_aquery_bypasses_opaque_context(self, MockEmbedder):
         mock_engine = MagicMock()
         mock_engine.aquery = AsyncMock(return_value="async cached answer")
 
@@ -85,4 +84,4 @@ class TestCachedQueryEngine:
 
         result2 = await engine.aquery("What is async RAG?")
         assert result2 == "async cached answer"
-        assert mock_engine.aquery.call_count == 1
+        assert mock_engine.aquery.call_count == 2

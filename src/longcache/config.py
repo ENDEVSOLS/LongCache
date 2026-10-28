@@ -38,18 +38,36 @@ class CacheConfig:
     namespace: str = "default"
     embedder_model: str = "BAAI/bge-small-en-v1.5"
     backend: str = "sqlite"
-    db_path: str = ".longcache/cache.db"
+    db_path: str = ".longcache/v2/cache.db"
     redis_url: str = "redis://localhost:6379/0"
     track_stats: bool = True
     faiss_index_type: str = "flat"
     hnsw_m: int = 32
     hnsw_ef_search: int = 64
+    scope_policy: str = "private"
+    cache_id: str = "default"
+    generation: str = "default"
+    policy_version: str = "safe-reuse-v1"
+    verification_budget: int = 8
+    max_query_chars: int = 16384
+    max_capture_bytes: int = 1048576
+    embedder_revision: str = ""
     model: str = ""
     system_prompt: str = ""
     temperature: float = -1.0
 
     def __post_init__(self):
         """Validate configuration values after initialization."""
+        import re
+
+        if self.scope_policy not in ("private", "tenant_shared", "public"):
+            raise ValueError("Invalid scope_policy")
+        for name in ("cache_id", "generation", "policy_version"):
+            if not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", getattr(self, name)):
+                raise ValueError(f"Invalid {name}")
+        for name in ("verification_budget", "max_query_chars", "max_capture_bytes"):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f"{name} must be a positive integer")
         if not 0.0 <= self.similarity_threshold <= 1.0:
             raise ValueError(
                 f"similarity_threshold must be between 0.0 and 1.0, got {self.similarity_threshold}"
@@ -73,7 +91,7 @@ class CacheConfig:
         """
         Create a CacheConfig from a dictionary.
 
-        Only keys that match CacheConfig fields are used; others are ignored.
+        Unknown keys are rejected so safety-policy typos cannot weaken configuration.
 
         Args:
             data: Dictionary with configuration keys.
@@ -82,8 +100,10 @@ class CacheConfig:
             CacheConfig instance with values from the dict.
         """
         valid_keys = {f.name for f in cls.__dataclass_fields__.values()}
-        filtered = {k: v for k, v in data.items() if k in valid_keys}
-        return cls(**filtered)
+        unknown = set(data) - valid_keys
+        if unknown:
+            raise ValueError(f"Unknown configuration keys: {sorted(unknown)}")
+        return cls(**data)
 
     @classmethod
     def from_env(cls, prefix: str = "LONGCACHE_") -> CacheConfig:
@@ -114,6 +134,8 @@ class CacheConfig:
                 elif field_type == "int":
                     env_values[field_name] = int(env_val)
                 elif field_type == "bool":
+                    if env_val.lower() not in ("true", "1", "yes", "false", "0", "no"):
+                        raise ValueError(f"Invalid boolean for {env_key}")
                     env_values[field_name] = env_val.lower() in ("true", "1", "yes")
                 else:
                     env_values[field_name] = env_val

@@ -79,3 +79,7 @@ test_cache.db
 # HuggingFace model cache (local downloads)
 .cache/
 models/
+
+# Evaluation and validation outputs
+/evaluation/
+/validation/

@@ -1,35 +1,19 @@
-"""
-LangChain integration for LongCache.
+"""Compatibility adapter: opaque langchain state bypasses cache access in v0.2.
 
-Provides CachedLLM and CachedChain wrappers that add semantic caching
-to any LangChain LLM or LCEL chain with zero code changes.
+Use explicit RequestContext with the manual interface for a proven workflow.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 
 from longcache import LongCache, CacheConfig
 
 
 class CachedLLM:
-    """
-    Wraps any LangChain LLM/ChatModel with semantic caching.
+    """Compatibility adapter; opaque framework state bypasses caching in v0.2."""
 
-    Drop-in replacement that preserves the full LLM interface.
-    Cache is checked before the LLM is called, and new responses
-    are cached automatically.
-
-    Usage:
-        from langchain_openai import ChatOpenAI
-        from longcache.integrations.langchain import CachedLLM
-
-        llm = CachedLLM(ChatOpenAI(model="gpt-4o"), cache=LongCache())
-        response = llm.invoke("What is the refund policy?")  # same API
-        # Second call with similar query returns cached response instantly
-        response2 = llm.invoke("How do I get a refund?")  # cache HIT
-    """
+    cache_bypass_reason = "unsupported_request_shape"
 
     def __init__(
         self,
@@ -48,7 +32,7 @@ class CachedLLM:
             namespace: Default namespace for cache entries.
         """
         self.llm = llm
-        self.cache = cache or LongCache(config or CacheConfig(namespace=namespace))
+        self.cache = cache
         self._namespace = namespace
 
     def _extract_query(self, input: Any) -> str:
@@ -94,115 +78,25 @@ class CachedLLM:
         return str(input)
 
     def invoke(self, input: Any, *args, **kwargs) -> Any:
-        """
-        Invoke the LLM with caching.
-
-        Checks the cache first. On a HIT, returns the cached response.
-        On a MISS, calls the LLM and caches the result.
-
-        Args:
-            input: The LLM input (string, messages list, or dict).
-            *args: Additional positional arguments passed to the LLM.
-            **kwargs: Additional keyword arguments passed to the LLM.
-
-        Returns:
-            The LLM response (from cache or fresh invocation).
-        """
-        query_key = self._extract_query(input)
-        cached = self.cache.get(query_key, namespace=self._namespace)
-        if cached is not None:
-            return cached
+        """Delegate unchanged; unproven execution identity is never cached."""
 
         result = self.llm.invoke(input, *args, **kwargs)
-        self.cache.set(query_key, result, namespace=self._namespace)
         return result
 
     async def ainvoke(self, input: Any, *args, **kwargs) -> Any:
-        """
-        Async invoke the LLM with caching.
-
-        Same as invoke() but uses the async LLM interface.
-
-        Args:
-            input: The LLM input.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            The LLM response (from cache or fresh invocation).
-        """
-        query_key = self._extract_query(input)
-        cached = await self.cache.aget(query_key, namespace=self._namespace)
-        if cached is not None:
-            return cached
+        """Delegate unchanged; unproven execution identity is never cached."""
 
         result = await self.llm.ainvoke(input, *args, **kwargs)
-        await self.cache.aset(query_key, result, namespace=self._namespace)
         return result
 
     def stream(self, input: Any, *args, **kwargs):
-        """
-        Stream the LLM response with caching.
-
-        On a cache HIT, replays the cached response token-by-token.
-        On a MISS, streams from the LLM, collects the response, and caches it.
-
-        Args:
-            input: The LLM input.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
-
-        Yields:
-            Response chunks (from cache replay or live LLM stream).
-        """
-        query_key = self._extract_query(input)
-        cached = self.cache.get(query_key, namespace=self._namespace)
-
-        if cached is not None:
-            # Replay cached response preserving original whitespace
-            cached_str = str(cached)
-            tokens = re.findall(r"\S+\s*", cached_str)
-            for token in tokens:
-                yield token
-            return
-
-        # Stream from LLM and collect
-        collected_chunks = []
-        for chunk in self.llm.stream(input, *args, **kwargs):
-            collected_chunks.append(chunk)
-            yield chunk
-
-        # Cache the assembled response
-        self.cache.set(query_key, collected_chunks, namespace=self._namespace)
+        """Delegate unchanged; unproven execution identity is never cached."""
+        yield from self.llm.stream(input, *args, **kwargs)
 
     async def astream(self, input: Any, *args, **kwargs):
-        """
-        Async stream the LLM response with caching.
-
-        Args:
-            input: The LLM input.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
-
-        Yields:
-            Response chunks.
-        """
-        query_key = self._extract_query(input)
-        cached = await self.cache.aget(query_key, namespace=self._namespace)
-
-        if cached is not None:
-            cached_str = str(cached)
-            tokens = re.findall(r"\S+\s*", cached_str)
-            for token in tokens:
-                yield token
-            return
-
-        collected_chunks = []
+        """Delegate unchanged; unproven execution identity is never cached."""
         async for chunk in self.llm.astream(input, *args, **kwargs):
-            collected_chunks.append(chunk)
             yield chunk
-
-        await self.cache.aset(query_key, collected_chunks, namespace=self._namespace)
 
     def __getattr__(self, name: str) -> Any:
         """Proxy all other attributes to the underlying LLM."""
@@ -213,20 +107,9 @@ class CachedLLM:
 
 
 class CachedChain:
-    """
-    Wraps any LCEL Runnable chain with semantic caching.
+    """Compatibility adapter; opaque framework state bypasses caching in v0.2."""
 
-    Cache key is the final user query string extracted from the chain input.
-    Works with any LCEL chain: prompt | llm | parser, RetrievalQA, etc.
-
-    Usage:
-        from langchain_openai import ChatOpenAI
-        from longcache.integrations.langchain import CachedChain
-
-        chain = prompt | ChatOpenAI() | StrOutputParser()
-        cached_chain = CachedChain(chain, cache=LongCache())
-        result = cached_chain.invoke({"question": "What is RAG?"})
-    """
+    cache_bypass_reason = "unsupported_request_shape"
 
     def __init__(
         self,
@@ -247,7 +130,7 @@ class CachedChain:
             namespace: Default namespace for cache entries.
         """
         self.chain = chain
-        self.cache = cache or LongCache(config or CacheConfig(namespace=namespace))
+        self.cache = cache
         self.query_key = query_key
         self._namespace = namespace
 
@@ -266,45 +149,15 @@ class CachedChain:
         return str(input)
 
     def invoke(self, input: Any, *args, **kwargs) -> Any:
-        """
-        Invoke the chain with caching.
-
-        Args:
-            input: Chain input (typically a dict with the query key).
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            The chain output (from cache or fresh invocation).
-        """
-        query = self._extract_query(input)
-        cached = self.cache.get(query, namespace=self._namespace)
-        if cached is not None:
-            return cached
+        """Delegate unchanged; unproven execution identity is never cached."""
 
         result = self.chain.invoke(input, *args, **kwargs)
-        self.cache.set(query, result, namespace=self._namespace)
         return result
 
     async def ainvoke(self, input: Any, *args, **kwargs) -> Any:
-        """
-        Async invoke the chain with caching.
-
-        Args:
-            input: Chain input.
-            *args: Additional positional arguments.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            The chain output (from cache or fresh invocation).
-        """
-        query = self._extract_query(input)
-        cached = await self.cache.aget(query, namespace=self._namespace)
-        if cached is not None:
-            return cached
+        """Delegate unchanged; unproven execution identity is never cached."""
 
         result = await self.chain.ainvoke(input, *args, **kwargs)
-        await self.cache.aset(query, result, namespace=self._namespace)
         return result
 
     def __getattr__(self, name: str) -> Any:

@@ -165,3 +165,18 @@ class AbstractCacheBackend(ABC):
             List of entry IDs that have expired.
         """
         ...
+
+    @abstractmethod
+    def list_all_entries(self) -> list[CacheEntry]:
+        """Enumerate live entries for a validated generation rebuild."""
+        ...
+
+    @abstractmethod
+    def ensure_manifest(self, manifest: dict) -> None:
+        """Initialize or compare the immutable store generation descriptor."""
+        ...
+
+    @abstractmethod
+    def read_manifest(self) -> dict | None:
+        """Read generation metadata without loading an embedding model."""
+        ...

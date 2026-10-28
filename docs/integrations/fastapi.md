@@ -1,59 +1,9 @@
-# FastAPI & Starlette Middleware
+# ASGI / FastAPI
 
-LongCache includes `LongCacheMiddleware` for ASGI frameworks (FastAPI, Starlette, Litestar). It intercepts HTTP requests to LLM endpoints and serves cached responses with custom HTTP cache headers.
+`LongCacheMiddleware` supports bounded non-streaming chat-completion JSON requests. Supply `context` with provider/deployment/operation/version configuration and a synchronous `scope_resolver(scope)` reading an authenticated principal from trusted ASGI state.
 
-## Installation
+Authentication middleware must run before scope resolution. Raw tenant/user headers, Authorization values, cookies, and API keys are not identity sources. Authenticated requests bypass without a trusted resolver. Resolver failure bypasses without shared-tenant fallback.
 
-```bash
-uv pip install "longcache[server]"
-# or
-pip install "longcache[server]"
-```
+The capture limit defaults to 1 MiB. Oversized, malformed/duplicate-key, unsupported-shape, and streaming requests pass through without cache storage. Complete status-200 responses require a single `application/json` media type; an optional charset is allowed, while `application/jsonp` is rejected. Cookie-bearing, `Vary`, private/no-store, incomplete, or oversized responses are not stored. Every repeated Cache-Control value is checked, so a later header cannot hide an earlier no-store directive. An observed request or response disconnect prevents storage, including when the application subsequently completes its response.
 
----
-
-## Usage in FastAPI
-
-```python
-from fastapi import FastAPI, Request
-from longcache import LongCache, CacheConfig
-from longcache.middleware import LongCacheMiddleware
-
-app = FastAPI(title="LLM Gateway API")
-
-# Initialize cache (SQLite or Redis)
-cache = LongCache(CacheConfig(similarity_threshold=0.92, namespace="api_gateway"))
-
-# Add middleware
-app.add_middleware(
-    LongCacheMiddleware,
-    cache=cache,
-    cached_routes={"/v1/chat/completions", "/api/chat"},  # Target endpoints
-)
-
-
-@app.post("/v1/chat/completions")
-async def chat_completions(request: Request):
-    body = await request.json()
-    # Your upstream LLM call here (e.g. LiteLLM, vLLM, OpenAI, Ollama)
-    return {
-        "id": "chatcmpl-123",
-        "choices": [{"message": {"role": "assistant", "content": "Hello from upstream model!"}}],
-    }
-```
-
----
-
-## Response Headers
-
-When `LongCacheMiddleware` serves a cached response, it injects observability headers into the HTTP response:
-
-| Header | Value | Meaning |
-|---|---|---|
-| `X-LongCache` | `HIT` | Present when a cached response is served; absent on a provider miss or bypass |
-
-## Supported requests in v0.1.1
-
-Eligible requests contain a model and a single text user message, with optional system/developer instructions and temperature. Multi-turn, streaming, tool, multimodal, and additional request options bypass caching. Requests with Authorization, Cookie, or X-API-Key headers also bypass caching because automatic user/tenant scoping is not implemented.
-
-The upstream response is cached only for successful JSON chat completions containing text and no refusal or tool calls. The supported context fields are included in the cache identity, and entries from the older middleware namespace are not reused.
+`X-LongCache`, `X-LongCache-Reason`, and an applicable same-scope similarity header explain lookup. Headers sent at response start do not claim later admission results. Upstream diagnostic copies are replaced; unsupported responses keep their body/status/framing.

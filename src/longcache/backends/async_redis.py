@@ -27,14 +27,17 @@ class AsyncRedisCacheBackend:
     Async Redis-based cache backend for distributed deployments.
     """
 
-    KEY_PREFIX = "longcache:entry"
-    NAMESPACE_SET = "longcache:namespaces"
-    ID_COUNTER = "longcache:id_counter"
+    ROOT = "longcache:v2:default:default"
+    KEY_PREFIX = ROOT + ":entry"
+    NAMESPACE_SET = ROOT + ":namespaces"
+    ID_COUNTER = ROOT + ":id_counter"
 
     def __init__(
         self,
         redis_url: str = "redis://localhost:6379/0",
         max_entries: int = 10_000,
+        cache_id: str = "default",
+        generation: str = "default",
     ):
         try:
             from redis.asyncio import Redis
@@ -44,6 +47,10 @@ class AsyncRedisCacheBackend:
                 "Install with: uv pip install longcache[redis]"
             )
 
+        self.ROOT = f"longcache:v2:{cache_id}:{generation}"
+        self.KEY_PREFIX = self.ROOT + ":entry"
+        self.NAMESPACE_SET = self.ROOT + ":namespaces"
+        self.ID_COUNTER = self.ROOT + ":id_counter"
         self._redis_url = redis_url
         self._max_entries = max_entries
         self._lock = asyncio.Lock()
@@ -53,7 +60,7 @@ class AsyncRedisCacheBackend:
         return f"{self.KEY_PREFIX}:{entry_id}"
 
     def _namespace_key(self, namespace: str) -> str:
-        return f"longcache:ns:{namespace}"
+        return f"{self.ROOT}:ns:{namespace}"
 
     def _vector_to_str(self, vector: np.ndarray) -> str:
         return base64.b64encode(vector.tobytes()).decode("ascii")
@@ -66,7 +73,7 @@ class AsyncRedisCacheBackend:
             entry_id = await self._client.incr(self.ID_COUNTER)
 
             vector_str = self._vector_to_str(entry.vector) if entry.vector is not None else ""
-            response_json = json.dumps(entry.response, default=str)
+            response_json = json.dumps(entry.response, allow_nan=False)
 
             entry_data = {
                 "id": entry_id,
@@ -81,6 +88,7 @@ class AsyncRedisCacheBackend:
                 "system_prompt": entry.system_prompt,
                 "temperature": entry.temperature,
                 "tags": json.dumps(list(entry.tags or [])),
+                "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
             }
 
             key = self._entry_key(entry_id)
@@ -92,7 +100,7 @@ class AsyncRedisCacheBackend:
             pipe.sadd(self.NAMESPACE_SET, entry.namespace)
 
             for tag in entry.tags or []:
-                pipe.sadd(f"longcache:tag:{entry.namespace}:{tag}", entry_id)
+                pipe.sadd(f"{self.ROOT}:tag:{entry.namespace}:{tag}", entry_id)
 
             if entry.expires_at is not None:
                 ttl_seconds = max(1, int(entry.expires_at - time.time()))
@@ -161,6 +169,7 @@ class AsyncRedisCacheBackend:
             system_prompt=data.get("system_prompt", ""),
             temperature=temperature,
             tags=tags,
+            metadata=json.loads(data.get("metadata", "{}")),
         )
 
     async def delete(self, entry_id: int) -> bool:
@@ -203,7 +212,7 @@ class AsyncRedisCacheBackend:
         Returns:
             The number of entries deleted.
         """
-        tag_key = f"longcache:tag:{namespace}:{tag}"
+        tag_key = f"{self.ROOT}:tag:{namespace}:{tag}"
         async with self._lock:
             entry_ids = await self._client.smembers(tag_key)
             if not entry_ids:

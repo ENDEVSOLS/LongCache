@@ -1,8 +1,6 @@
-"""
-LlamaIndex integration for LongCache.
+"""Compatibility adapter: opaque llamaindex state bypasses cache access in v0.2.
 
-Provides CachedQueryEngine that wraps any LlamaIndex query engine
-with semantic caching.
+Use explicit RequestContext with the manual interface for a proven workflow.
 """
 
 from __future__ import annotations
@@ -13,25 +11,9 @@ from longcache import LongCache, CacheConfig
 
 
 class CachedQueryEngine:
-    """
-    Wraps a LlamaIndex query engine with semantic caching.
+    """Compatibility adapter; opaque framework state bypasses caching in v0.2."""
 
-    Intercepts queries before they reach the LlamaIndex retrieval
-    and generation pipeline. On cache HIT, returns the cached
-    response instantly.
-
-    Requires the 'llamaindex' extra: uv pip install longcache[llamaindex]
-
-    Usage:
-        from llama_index.core import VectorStoreIndex
-        from longcache.integrations.llamaindex import CachedQueryEngine
-
-        index = VectorStoreIndex.from_documents(documents)
-        engine = index.as_query_engine()
-
-        cached_engine = CachedQueryEngine(engine, cache=LongCache())
-        response = cached_engine.query("What is RAG?")
-    """
+    cache_bypass_reason = "unsupported_request_shape"
 
     def __init__(
         self,
@@ -50,49 +32,19 @@ class CachedQueryEngine:
             namespace: Default namespace for cache entries.
         """
         self.query_engine = query_engine
-        self.cache = cache or LongCache(config or CacheConfig(namespace=namespace))
+        self.cache = cache
         self._namespace = namespace
 
     def query(self, query_str: str, **kwargs) -> Any:
-        """
-        Query the engine with caching.
-
-        Checks the cache first using semantic similarity. On a HIT,
-        returns the cached response. On a MISS, runs the full query
-        pipeline and caches the result.
-
-        Args:
-            query_str: The query string.
-            **kwargs: Additional keyword arguments passed to the query engine.
-
-        Returns:
-            The query response (from cache or fresh invocation).
-        """
-        cached = self.cache.get(query_str, namespace=self._namespace)
-        if cached is not None:
-            return cached
+        """Delegate unchanged; unproven execution identity is never cached."""
 
         result = self.query_engine.query(query_str, **kwargs)
-        self.cache.set(query_str, result, namespace=self._namespace)
         return result
 
     async def aquery(self, query_str: str, **kwargs) -> Any:
-        """
-        Async query the engine with caching.
-
-        Args:
-            query_str: The query string.
-            **kwargs: Additional keyword arguments.
-
-        Returns:
-            The query response (from cache or fresh invocation).
-        """
-        cached = self.cache.get(query_str, namespace=self._namespace)
-        if cached is not None:
-            return cached
+        """Delegate unchanged; unproven execution identity is never cached."""
 
         result = await self.query_engine.aquery(query_str, **kwargs)
-        self.cache.set(query_str, result, namespace=self._namespace)
         return result
 
     def __getattr__(self, name: str) -> Any:

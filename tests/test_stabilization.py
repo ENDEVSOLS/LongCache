@@ -2,6 +2,8 @@
 
 import numpy as np
 import pytest
+from longcache import BaseEmbedder, EmbeddingDescriptor
+from tests.helpers import trusted_context
 
 from longcache.backends.memory import InMemoryCacheBackend
 from longcache.config import CacheConfig
@@ -15,14 +17,16 @@ def vector(x, y):
     return value / np.linalg.norm(value)
 
 
-class SmallEmbedder:
+class SmallEmbedder(BaseEmbedder):
+    dimension = 2
+    descriptor = EmbeddingDescriptor("small", "v1", 2)
+
     def embed(self, query):
         return vector(1, 0) if query == "first" else vector(0, 1)
 
 
 def make_cache(monkeypatch, config):
-    monkeypatch.setattr("longcache.core.cache.LocalEmbedder", lambda _: SmallEmbedder())
-    return LongCache(config)
+    return LongCache(config, embedder=SmallEmbedder(), context=trusted_context())
 
 
 def test_lookup_skips_other_namespace_and_counts_once():
@@ -116,8 +120,8 @@ def test_async_redis_cache_configuration_fails_fast():
 
 def test_context_manager_stops_sweeper(monkeypatch):
     with make_cache(monkeypatch, CacheConfig(backend="memory", ttl_seconds=1)) as cache:
-        assert cache._sweep_thread.is_alive()
-    assert not cache._sweep_thread.is_alive()
+        assert cache._sweep_thread is None  # Memory has no sweeper resource to stop.
+    assert cache._closed
     cache.close()
 
 

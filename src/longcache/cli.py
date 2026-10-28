@@ -1,216 +1,129 @@
-"""
-LongCache CLI — Command-line interface for cache management.
+"""Scoped cache inspection and explicit local operator maintenance."""
 
-Provides commands for viewing stats, clearing cache, inspecting
-entries, and exporting cache data.
-
-Usage:
-    longcache stats
-    longcache clear --namespace default
-    longcache clear --all
-    longcache inspect --query "refund"
-    longcache export --format json
-"""
-
-from __future__ import annotations
-
+from dataclasses import asdict
 import json
-from typing import Optional
-
+from pathlib import Path
 import click
-
-from longcache.config import CacheConfig
-from longcache import __version__
+from longcache import CacheConfig, Instruction, LongCache, RequestContext, RequestScope, __version__
 
 
-def _get_cache(config: Optional[CacheConfig] = None):
-    """Get a LongCache instance, lazily initialized."""
-    from longcache import LongCache
+def _get_cache(config=None, *, metadata_only=False):
+    return LongCache(config or CacheConfig(), metadata_only=metadata_only)
 
-    return LongCache(config or CacheConfig())
+
+def _context(path):
+    if path is None:
+        return None
+    try:
+        data = json.loads(Path(path).read_text())
+        scope = data.get("scope")
+        data["scope"] = RequestScope(**scope) if scope is not None else None
+        data["instructions"] = tuple(Instruction(**item) for item in data.get("instructions", []))
+        return RequestContext(**data)
+    except (ValueError, TypeError, OSError) as exc:
+        raise click.ClickException("Invalid context file") from exc
+
+
+def common(fn):
+    for option in [
+        click.option("--db-path", default=".longcache/v2/cache.db", show_default=True),
+        click.option("--namespace", default="default"),
+        click.option(
+            "--scope-policy",
+            type=click.Choice(["private", "tenant_shared", "public"]),
+            default="private",
+        ),
+        click.option("--context-file", type=click.Path(exists=True, dir_okay=False)),
+        click.option(
+            "--operator",
+            is_flag=True,
+            help="Explicit trusted access to every partition in this store.",
+        ),
+    ]:
+        fn = option(fn)
+    return fn
+
+
+def _open(db_path, namespace, scope_policy, metadata_only):
+    return _get_cache(
+        CacheConfig(db_path=db_path, namespace=namespace, scope_policy=scope_policy),
+        metadata_only=metadata_only,
+    )
 
 
 @click.group()
 @click.version_option(version=__version__, prog_name="longcache")
 def main():
-    """
-    LongCache — Semantic similarity cache for LLM/RAG pipelines.
-
-    View stats, manage entries, and configure your cache from the command line.
-    """
-    pass
+    """Inspect scoped cache decisions or explicitly maintain an owned v0.2 store."""
 
 
 @main.command()
-@click.option("--namespace", default=None, help="Namespace to show stats for.")
-@click.option("--db-path", default=".longcache/cache.db", help="Path to cache database.")
-def stats(namespace: Optional[str], db_path: str):
-    """
-    Show cache hit rate, estimated savings, and entry count.
-
-    Displays key metrics about your cache performance including
-    hit rate, estimated tokens saved, and estimated cost savings.
-
-    Examples:
-
-        longcache stats
-
-        longcache stats --namespace faq
-    """
-    config = CacheConfig(db_path=db_path, namespace=namespace or "default")
-    cache = _get_cache(config)
-
-    s = cache.stats()
-
-    click.echo("=" * 50)
-    click.echo("  LongCache Statistics")
-    click.echo("=" * 50)
-    click.echo(f"  Namespace:          {config.namespace}")
-    click.echo(f"  Cache Hits:         {s['hits']}")
-    click.echo(f"  Cache Misses:       {s['misses']}")
-    click.echo(f"  Hit Rate:           {s['hit_rate']:.1%}")
-    click.echo(f"  Total Entries:      {s['total_entries']}")
-    click.echo(f"  Est. Tokens Saved:  {s['estimated_tokens_saved']:,}")
-    click.echo(f"  Est. Cost Saved:    ${s['estimated_cost_saved_usd']:.4f}")
-    click.echo("=" * 50)
+@common
+def stats(db_path, namespace, scope_policy, context_file, operator):
+    """Show counts for the declared scope; process hit/miss counters reset on restart."""
+    with _open(db_path, namespace, scope_policy, True) as cache:
+        result = cache.stats(context=_context(context_file), operator=operator)
+        click.echo("LongCache Statistics (format 2)")
+        click.echo(json.dumps(result, indent=2))
 
 
 @main.command()
-@click.option("--namespace", default=None, help="Namespace to clear.")
-@click.option("--all", "clear_all", is_flag=True, help="Clear ALL namespaces.")
-@click.option("--db-path", default=".longcache/cache.db", help="Path to cache database.")
-@click.confirmation_option(prompt="Are you sure you want to clear the cache?")
-def clear(namespace: Optional[str], clear_all: bool, db_path: str):
-    """
-    Clear cache entries by namespace or entirely.
-
-    Use --namespace to clear a specific namespace, or --all
-    to clear the entire cache across all namespaces.
-
-    Examples:
-
-        longcache clear --namespace faq
-
-        longcache clear --all
-    """
-    config = CacheConfig(db_path=db_path)
-    cache = _get_cache(config)
-
-    if clear_all:
-        count = cache.clear()
-        click.echo(f"Cleared entire cache: {count} entries deleted.")
-    elif namespace:
-        count = cache.invalidate(namespace)
-        click.echo(f"Cleared namespace '{namespace}': {count} entries deleted.")
-    else:
-        count = cache.invalidate()
-        click.echo(f"Cleared namespace '{config.namespace}': {count} entries deleted.")
-
-
-@main.command()
-@click.option("--query", required=True, help="Query text to search for similar cached entries.")
-@click.option("--namespace", default=None, help="Namespace to search in.")
-@click.option("--db-path", default=".longcache/cache.db", help="Path to cache database.")
-def inspect(query: str, namespace: Optional[str], db_path: str):
-    """
-    Inspect the nearest cached entry for a query.
-
-    Shows the most similar cached entry regardless of the
-    similarity threshold. Useful for debugging and understanding
-    what would be cached for a given query.
-
-    Examples:
-
-        longcache inspect --query "What is the refund policy?"
-
-        longcache inspect --query "refund" --namespace faq
-    """
-    config = CacheConfig(db_path=db_path, namespace=namespace or "default")
-    cache = _get_cache(config)
-
-    result = cache.inspect(query, namespace=namespace)
-
-    if result is None:
-        click.echo(f"No similar entries found for query: {query!r}")
+@common
+@click.option("--query", required=True)
+def inspect(db_path, namespace, scope_policy, context_file, operator, query):
+    """Explain a lookup without recording a hit. Context is always required."""
+    if operator:
+        raise click.UsageError(
+            "Inspect a specific context; operator mode cannot select a user's identity"
+        )
+    # A missing context can be explained without loading a model.
+    ctx = _context(context_file)
+    if ctx is None:
+        click.echo(
+            json.dumps({"outcome": "BYPASS", "reason": "missing_identity", "format_version": 2})
+        )
         return
-
-    click.echo("=" * 50)
-    click.echo("  Nearest Cached Entry")
-    click.echo("=" * 50)
-    click.echo(f"  ID:            {result['id']}")
-    click.echo(f"  Cached Query:  {result['query']!r}")
-    click.echo(f"  Namespace:     {result['namespace']}")
-    click.echo(f"  Hit Count:     {result['hit_count']}")
-    click.echo(f"  Created At:    {result['created_at']}")
-    click.echo(f"  Expires At:    {result['expires_at'] or 'Never'}")
-    click.echo(f"  Is Expired:    {result['is_expired']}")
-    click.echo("=" * 50)
+    with _open(db_path, namespace, scope_policy, False) as cache:
+        click.echo(json.dumps(cache.inspect(query, context=ctx), indent=2))
 
 
 @main.command()
-@click.option(
-    "--format",
-    "export_format",
-    default="json",
-    type=click.Choice(["json"]),
-    help="Export format (currently only JSON supported).",
-)
-@click.option("--namespace", default=None, help="Only export entries from this namespace.")
-@click.option("--db-path", default=".longcache/cache.db", help="Path to cache database.")
-@click.option("--output", "-o", default=None, help="Output file path. Defaults to stdout.")
-def export(export_format: str, namespace: Optional[str], db_path: str, output: Optional[str]):
-    """
-    Export cache entries as JSON.
+@common
+@click.option("--all", "all_partitions", is_flag=True)
+@click.option("--yes", is_flag=True, help="Confirm deletion of the selected owned entries.")
+def clear(db_path, namespace, scope_policy, context_file, operator, all_partitions, yes):
+    """Delete one exact context, or explicitly delete every owned partition."""
+    ctx = _context(context_file)
+    if all_partitions and not operator:
+        raise click.UsageError("--all requires --operator")
+    if operator and not all_partitions:
+        raise click.UsageError("Operator deletion requires explicit --all")
+    if ctx is None and not all_partitions:
+        raise click.UsageError("Scoped deletion requires --context-file")
+    if not yes:
+        click.confirm("Delete the selected owned cache entries?", abort=True)
+    with _open(db_path, namespace, scope_policy, True) as cache:
+        count = cache.clear(operator=True) if all_partitions else cache.invalidate(context=ctx)
+        click.echo(f"{count} entries deleted")
 
-    Dumps all cache entries (or entries from a specific namespace)
-    in JSON format. Useful for backup, migration, or analysis.
 
-    Examples:
-
-        longcache export --format json
-
-        longcache export --namespace faq -o faq_cache.json
-    """
-    config = CacheConfig(db_path=db_path, namespace=namespace or "default")
-    cache = _get_cache(config)
-
-    # Access the backend directly for export
-    from longcache.backends.sqlite import SQLiteCacheBackend
-
-    backend = cache.backend
-
-    if isinstance(backend, SQLiteCacheBackend):
-        entries = backend.export_all()
-    else:
-        # Generic fallback
-        ns = namespace or config.namespace
-        entries_raw = backend.list_entries(ns)
-        entries = [
-            {
-                "id": e.id,
-                "namespace": e.namespace,
-                "query": e.query,
-                "response": str(e.response),
-                "created_at": e.created_at,
-                "expires_at": e.expires_at,
-                "hit_count": e.hit_count,
-            }
-            for e in entries_raw
-        ]
-
-    # Filter by namespace if specified
-    if namespace:
-        entries = [e for e in entries if e.get("namespace") == namespace]
-
-    json_output = json.dumps(entries, indent=2, default=str)
-
+@main.command()
+@common
+@click.option("--format", "output_format", type=click.Choice(["json"]), default="json")
+@click.option("--output", "-o", type=click.Path(dir_okay=False))
+def export(db_path, namespace, scope_policy, context_file, operator, output_format, output):
+    """Export raw owned payloads only for an explicit context or trusted operator."""
+    ctx = _context(context_file)
+    if ctx is None and not operator:
+        raise click.UsageError("Export requires --context-file or --operator")
+    with _open(db_path, namespace, scope_policy, True) as cache:
+        records = []
+        for entry in cache.entries(context=ctx, operator=operator):
+            record = asdict(entry)
+            record.pop("vector", None)
+            records.append(record)
+        encoded = json.dumps(records, indent=2, allow_nan=False)
     if output:
-        with open(output, "w") as f:
-            f.write(json_output)
-        click.echo(f"Exported {len(entries)} entries to {output}")
+        Path(output).write_text(encoded + "\n")
     else:
-        click.echo(json_output)
-
-
-if __name__ == "__main__":
-    main()
+        click.echo(encoded)

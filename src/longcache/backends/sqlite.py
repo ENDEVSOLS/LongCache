@@ -47,7 +47,8 @@ class SQLiteCacheBackend(AbstractCacheBackend):
         hit_count INTEGER DEFAULT 0,
         model TEXT DEFAULT '',
         system_prompt TEXT DEFAULT '',
-        temperature REAL DEFAULT -1.0
+        temperature REAL DEFAULT -1.0,
+        metadata TEXT NOT NULL DEFAULT '{}'
     );
     CREATE INDEX IF NOT EXISTS idx_namespace ON cache_entries(namespace);
     CREATE INDEX IF NOT EXISTS idx_expires ON cache_entries(expires_at);
@@ -90,24 +91,72 @@ class SQLiteCacheBackend(AbstractCacheBackend):
         if db_dir:
             os.makedirs(db_dir, exist_ok=True)
 
-        # Initialize schema
-        with self._get_connection() as conn:
-            conn.executescript(self.SCHEMA)
-            # Schema migrations for existing databases
-            cursor = conn.execute("PRAGMA table_info(cache_entries)")
-            columns = {row["name"] for row in cursor.fetchall()}
-            if "model" not in columns:
-                conn.execute("ALTER TABLE cache_entries ADD COLUMN model TEXT DEFAULT ''")
-            if "system_prompt" not in columns:
-                conn.execute("ALTER TABLE cache_entries ADD COLUMN system_prompt TEXT DEFAULT ''")
-            if "temperature" not in columns:
-                conn.execute("ALTER TABLE cache_entries ADD COLUMN temperature REAL DEFAULT -1.0")
-
+        conn = self._get_connection()
+        try:
+            with conn:
+                columns = {r["name"] for r in conn.execute("PRAGMA table_info(cache_entries)")}
+                if columns and "metadata" not in columns:
+                    raise ValueError(
+                        "Legacy cache format: use a new v0.2 database path; old data was not modified"
+                    )
+                required = {
+                    "id",
+                    "namespace",
+                    "query",
+                    "vector",
+                    "response",
+                    "created_at",
+                    "expires_at",
+                    "hit_count",
+                    "model",
+                    "system_prompt",
+                    "temperature",
+                    "metadata",
+                }
+                if columns and not required.issubset(columns):
+                    raise ValueError("Incompatible cache schema; use a new v0.2 database path")
+                if columns and conn.execute("SELECT 1 FROM cache_entries LIMIT 1").fetchone():
+                    manifest_table = conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='cache_manifest'"
+                    ).fetchone()
+                    if (
+                        not manifest_table
+                        or not conn.execute("SELECT 1 FROM cache_manifest WHERE id=1").fetchone()
+                    ):
+                        raise ValueError(
+                            "Missing storage manifest in nonempty cache; use a new store"
+                        )
+                # Begin inside executescript, which otherwise commits an existing transaction.
+                conn.executescript("BEGIN IMMEDIATE;\n" + self.SCHEMA)
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS cache_manifest (id INTEGER PRIMARY KEY CHECK(id=1), data TEXT NOT NULL)"
+                )
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-            conn.execute("PRAGMA cache_size=-64000")  # 64MB page cache
-            conn.execute("PRAGMA temp_store=MEMORY")  # temp tables in RAM
-            conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
+            conn.execute("PRAGMA cache_size=-64000")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            conn.execute("PRAGMA mmap_size=268435456")
+        except BaseException:
+            conn.rollback()
+            self.close()
+            raise
+
+    def read_manifest(self):
+        row = (
+            self._get_connection().execute("SELECT data FROM cache_manifest WHERE id=1").fetchone()
+        )
+        return json.loads(row[0]) if row else None
+
+    def ensure_manifest(self, manifest: dict) -> None:
+        from longcache.core.identity import canonical
+
+        encoded = canonical(manifest)
+        with self._lock, self._get_connection() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO cache_manifest (id, data) VALUES (1, ?)", (encoded,)
+            )
+            if conn.execute("SELECT data FROM cache_manifest WHERE id=1").fetchone()[0] != encoded:
+                raise ValueError("Incompatible embedding or storage generation; use a new store")
 
     def _get_connection(self) -> sqlite3.Connection:
         """
@@ -135,7 +184,7 @@ class SQLiteCacheBackend(AbstractCacheBackend):
     def _entry_to_row(self, entry: CacheEntry) -> dict:
         """Convert a CacheEntry to a row dict for database insertion."""
         vector_bytes = entry.vector.tobytes() if entry.vector is not None else b""
-        response_json = json.dumps(entry.response, default=str)
+        response_json = json.dumps(entry.response, allow_nan=False)
 
         return {
             "namespace": entry.namespace,
@@ -148,6 +197,7 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             "model": entry.model,
             "system_prompt": entry.system_prompt,
             "temperature": entry.temperature,
+            "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
         }
 
     def _row_to_entry(self, row) -> CacheEntry:
@@ -194,6 +244,7 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             system_prompt=system_prompt,
             temperature=temperature,
             tags=tags,
+            metadata=json.loads(row["metadata"]),
         )
 
     def store(self, entry: CacheEntry) -> int:
@@ -212,8 +263,8 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             conn = self._get_connection()
             cursor = conn.execute(
                 """
-                INSERT INTO cache_entries (namespace, query, vector, response, created_at, expires_at, hit_count, model, system_prompt, temperature)
-                VALUES (:namespace, :query, :vector, :response, :created_at, :expires_at, :hit_count, :model, :system_prompt, :temperature)
+                INSERT INTO cache_entries (namespace, query, vector, response, created_at, expires_at, hit_count, model, system_prompt, temperature, metadata)
+                VALUES (:namespace, :query, :vector, :response, :created_at, :expires_at, :hit_count, :model, :system_prompt, :temperature, :metadata)
                 """,
                 row,
             )

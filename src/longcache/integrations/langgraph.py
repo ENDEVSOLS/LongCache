@@ -1,7 +1,6 @@
-"""
-LangGraph integration for LongCache.
+"""Compatibility adapter: opaque langgraph state bypasses cache access in v0.2.
 
-Provides CachedState wrapper for semantic caching of agent/graph states.
+Use explicit RequestContext with the manual interface for a proven workflow.
 """
 
 from __future__ import annotations
@@ -12,22 +11,9 @@ from longcache import LongCache
 
 
 class CachedState:
-    """
-    Wraps LangGraph state evaluation with semantic caching.
+    """Compatibility adapter; opaque framework state bypasses caching in v0.2."""
 
-    Can be used as a node in a LangGraph graph to check the semantic cache
-    before executing expensive LLM nodes.
-
-    Usage:
-        from longcache.integrations.langgraph import CachedState
-        from longcache import LongCache
-
-        cache = LongCache()
-
-        def cache_node(state: dict):
-            # Check cache based on the latest message/input
-            return CachedState.check(state, cache, query_key="messages")
-    """
+    cache_bypass_reason = "unsupported_request_shape"
 
     @staticmethod
     def check(
@@ -36,20 +22,7 @@ class CachedState:
         query_key: str = "messages",
         namespace: str = "langgraph",
     ) -> dict:
-        """
-        Check the cache for a given state.
-
-        Args:
-            state: The LangGraph state dictionary.
-            cache: LongCache instance.
-            query_key: The key in the state to use as the cache query.
-                If it's a list of messages, the last human message is used.
-            namespace: The cache namespace.
-
-        Returns:
-            A dictionary with cache results. If a hit is found, it can be
-            merged back into the state to skip LLM execution.
-        """
+        """Return a miss for opaque graph state, preserving legacy query extraction."""
         query_input = state.get(query_key)
 
         # Extract string query
@@ -72,10 +45,6 @@ class CachedState:
 
         if not query:
             return {"__cache_hit": False}
-
-        cached = cache.get(query, namespace=namespace)
-        if cached is not None:
-            return {"__cache_hit": True, "cached_response": cached}
 
         return {"__cache_hit": False, "cached_query": query}
 
@@ -86,7 +55,7 @@ class CachedState:
         query_key: str = "messages",
         namespace: str = "langgraph",
     ) -> dict:
-        """Async version of check()."""
+        """Return a miss for opaque graph state, preserving legacy query extraction."""
         query_input = state.get(query_key)
 
         # Extract string query
@@ -110,10 +79,6 @@ class CachedState:
         if not query:
             return {"__cache_hit": False}
 
-        cached = await cache.aget(query, namespace=namespace)
-        if cached is not None:
-            return {"__cache_hit": True, "cached_response": cached}
-
         return {"__cache_hit": False, "cached_query": query}
 
     @staticmethod
@@ -123,18 +88,9 @@ class CachedState:
         cache: LongCache,
         namespace: str = "langgraph",
     ) -> None:
-        """
-        Save a new response to the cache.
-
-        Args:
-            state: The state dictionary (must contain 'cached_query' from check).
-            response: The response to cache.
-            cache: LongCache instance.
-            namespace: The cache namespace.
-        """
-        query = state.get("cached_query")
-        if query:
-            cache.set(query, response, namespace=namespace)
+        """No-op: graph state has no supported identity/replay contract in v0.2."""
+        # Opaque graph state has no complete identity/replay contract in v0.2.
+        return None
 
     @staticmethod
     async def asave(
@@ -143,7 +99,5 @@ class CachedState:
         cache: LongCache,
         namespace: str = "langgraph",
     ) -> None:
-        """Async version of save()."""
-        query = state.get("cached_query")
-        if query:
-            await cache.aset(query, response, namespace=namespace)
+        """No-op: graph state has no supported identity/replay contract in v0.2."""
+        return None

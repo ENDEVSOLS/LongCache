@@ -2,6 +2,39 @@
 
 All notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] - 2026-10-27
+
+### Added
+
+- Immutable `RequestScope`, `RequestContext`, and ordered instructions, with canonical full-length identity digests across lookup, writes, maintenance, and restart.
+- Explicit private, tenant-shared, and public sharing policies. Missing private identity bypasses cache access before embedding.
+- Typed lookup/store decisions, same-scope similarity scores, redacted inspection, and bounded ASGI decision headers.
+- Mandatory response admission, strict JSON/OpenAI codecs, optional synchronous admission/verifier hooks, and conservative English mismatch checks.
+- Injected `BaseEmbedder` support with model/revision/preprocessing descriptors, vector validation, and immutable storage-generation manifests.
+- Format-2 storage with isolated Redis keys and a new SQLite path; payload integrity checks and cold-cache migration/rollback guidance.
+- A frozen 4,800-case synthetic evaluation, pinned-model provenance, and flat/HNSW 1K/10K warm-hit comparisons against the committed v0.1.1 baseline.
+
+### Changed
+
+- Python minimum is now 3.11; supported CI interpreters are 3.11 and 3.12. v0.1.1 retains Python 3.10 support.
+- `set`/`aset` return `StoreDecision`. `lookup`/`alookup` expose decisions; `get`/`aget` remain response-or-None conveniences.
+- Default SQLite path is `.longcache/v2/cache.db`; legacy files are refused without modification. Existing under-scoped entries are not promoted.
+- Scoped inspection and maintenance replace namespace-only assumptions. Raw exports and whole-store clearing require explicit scope/operator access.
+- Generic LangChain/LangGraph/LlamaIndex wrappers and all streaming helpers are compatibility pass-through until their identity and replay contracts are proven.
+- Query-only decorators bind a qualified function operation; additional arguments bypass. Unknown configuration keys raise.
+- Unmeasured cost fields remain zero; process counters reset on restart while entry hit counts persist. Manual hit/miss accounting methods were removed.
+
+### Fixed
+
+- Unsafe ASGI responses with repeated cache directives, non-JSON media types, or observed disconnects are never admitted.
+- Empty embedding batches enforce the same float32/contiguous contract as populated batches.
+- SQLite schema initialization is transactional, including process termination; incompatible partial schemas and missing manifests in populated SQLite/Redis stores fail closed.
+
+### Validation
+
+- Full local Python 3.11/3.12 runs include real Redis and cached BGE weights. See `docs/plans/v0.2.0-execution.md` for exact evidence and remaining external release gates.
+- Synthetic results are template-expanded and do not establish correctness on unrelated workloads. End-to-end timing is reported separately from precomputed-vector scenario timing.
+
 ## [0.1.1] - 2026-10-27
 
 ### Fixed

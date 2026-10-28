@@ -42,6 +42,20 @@ class InMemoryCacheBackend(AbstractCacheBackend):
         self._next_id = 1
         self._lock = threading.RLock()
 
+    def read_manifest(self):
+        import json
+
+        return json.loads(self._manifest) if hasattr(self, "_manifest") else None
+
+    def ensure_manifest(self, manifest: dict) -> None:
+        from longcache.core.identity import canonical
+
+        with self._lock:
+            encoded = canonical(manifest)
+            if hasattr(self, "_manifest") and self._manifest != encoded:
+                raise ValueError("Incompatible embedding or storage generation")
+            self._manifest = encoded
+
     def store(self, entry: CacheEntry) -> int:
         """
         Store a cache entry in memory.

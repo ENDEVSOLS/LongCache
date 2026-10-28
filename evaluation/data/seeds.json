@@ -1,0 +1,9 @@
+{
+  "version": "safe-reuse-synthetic-v1",
+  "license": "MIT",
+  "labeling": "Authored operation paraphrases share an answer within identical account/context. Negation, changed quantities, account identifiers and temporal relations require different answers. Context changes forbid reuse regardless of wording.",
+  "actions": [
+    "reset my password", "change my email address", "update my phone number", "track my order", "cancel my subscription", "renew my subscription", "pause my subscription", "upgrade my membership", "downgrade my plan", "download my invoice", "update my billing address", "change my shipping address", "return a product", "request a refund", "activate my account", "delete my account", "export my account data", "enable two-factor authentication", "download a payment receipt", "replace a damaged product", "report a missing order", "contact customer support", "redeem a gift card", "apply a promotional code", "update my payment method", "view my purchase history", "change my language preference", "manage my notifications", "close my account", "recover my username", "check my reward balance", "remove a saved card", "update my profile picture", "change my delivery instructions", "request a replacement card", "download my account statement", "manage my privacy settings", "report a billing error", "check my delivery status", "change my security question"
+  ],
+  "development_actions": ["reset my password", "track my order", "cancel my subscription", "update my billing address", "return a product"]
+}

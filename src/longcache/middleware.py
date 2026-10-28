@@ -1,400 +1,216 @@
-"""
-FastAPI/Starlette ASGI middleware for LongCache.
-
-Intercepts HTTP requests to chat completion endpoints, checks the
-semantic cache before forwarding to the upstream LLM API, and
-auto-caches responses. Drop-in middleware for any Starlette app.
-"""
+"""Bounded ASGI adapter. Authentication and authorization remain application concerns."""
 
 from __future__ import annotations
-
+from dataclasses import replace
+import inspect
 import json
-from typing import Any, Callable, Optional, Set
+from longcache import CacheConfig, LongCache, RequestScope
+from longcache.integrations.openai import prepare_request
 
-from longcache import LongCache, CacheConfig
-from longcache.integrations.openai import _request_context
+
+def _object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate request keys are not cacheable")
+        result[key] = value
+    return result
 
 
 class LongCacheMiddleware:
-    """
-    ASGI middleware that adds semantic caching to LLM API endpoints.
-
-    Intercepts POST requests to configured routes (default: /v1/chat/completions),
-    extracts the user query, checks the semantic cache, and either returns
-    the cached response or forwards the request and caches the result.
-
-    Usage:
-        from fastapi import FastAPI
-        from longcache.middleware import LongCacheMiddleware
-
-        app = FastAPI()
-        app.add_middleware(LongCacheMiddleware, cache=LongCache())
-
-    Or with Starlette:
-        from starlette.applications import Starlette
-        from longcache.middleware import LongCacheMiddleware
-
-        app = Starlette(middleware=[
-            (LongCacheMiddleware, {"cache": LongCache()})
-        ])
-    """
-
     def __init__(
         self,
-        app: Callable,
-        cache: Optional[LongCache] = None,
-        config: Optional[CacheConfig] = None,
-        namespace: str = "http",
-        cached_routes: Optional[Set[str]] = None,
-        exclude_namespaces: Optional[Set[str]] = None,
+        app,
+        cache=None,
+        config=None,
+        namespace="http",
+        cached_routes=None,
+        exclude_namespaces=None,
+        *,
+        context=None,
+        scope_resolver=None,
     ):
-        """
-        Initialize the LongCache ASGI middleware.
-
-        Args:
-            app: The ASGI application to wrap.
-            cache: Existing LongCache instance. Creates a new one if not provided.
-            config: CacheConfig for the new cache (ignored if cache is provided).
-            namespace: Default namespace for cache entries.
-            cached_routes: Set of URL paths that should be cached.
-                Defaults to {"/v1/chat/completions", "/chat/completions"}.
-            exclude_namespaces: Set of namespaces to exclude from caching.
-        """
         self.app = app
-        self.cache = cache or LongCache(config or CacheConfig(namespace=namespace))
-        self._namespace = namespace
-        self.cached_routes = cached_routes or {
-            "/v1/chat/completions",
-            "/chat/completions",
-        }
-        self.exclude_namespaces = exclude_namespaces or set()
+        self.cache = cache if cache is not None else LongCache(config or CacheConfig())
+        self.namespace = namespace
+        self.routes = set(cached_routes or {"/v1/chat/completions", "/chat/completions"})
+        self.excluded = set(exclude_namespaces or ())
+        self.context = context
+        if scope_resolver is not None and (
+            not callable(scope_resolver)
+            or inspect.iscoroutinefunction(scope_resolver)
+            or inspect.iscoroutinefunction(getattr(scope_resolver, "__call__", None))
+        ):
+            raise ValueError("Scope resolver must be a synchronous callable")
+        self.scope_resolver = scope_resolver
 
-    async def __call__(self, scope: dict, receive: Callable, send: Callable):
-        """
-        ASGI middleware entry point.
-
-        Intercepts request/response flow for configured routes.
-        """
-        if scope["type"] != "http":
+    async def __call__(self, scope, receive, send):
+        if (
+            scope["type"] != "http"
+            or scope.get("method") != "POST"
+            or scope.get("path") not in self.routes
+            or self.namespace in self.excluded
+        ):
             await self.app(scope, receive, send)
             return
-
-        path = scope.get("path", "")
-        method = scope.get("method", "")
-
-        # Only intercept POST requests to cached routes
-        if method != "POST" or path not in self.cached_routes:
-            await self.app(scope, receive, send)
-            return
-
-        # Read the request body
-        body = await self._read_body(receive)
-
-        # User identity is not part of the v0.1.1 cache key. Keep authenticated
-        # requests out of a shared namespace until trusted tenant scoping exists.
-        header_names = {name.lower() for name, _ in scope.get("headers", [])}
-        if header_names & {b"authorization", b"cookie", b"x-api-key"}:
-            await self._send_passthrough(scope, body, send)
-            return
-
-        try:
-            request_data = json.loads(body) if body else {}
-        except json.JSONDecodeError:
-            # Not JSON, pass through without caching
-            await self._send_passthrough(scope, body, send)
-            return
-
-        context = _request_context(request_data) if isinstance(request_data, dict) else None
-        if context is None:
-            await self._send_passthrough(scope, body, send)
-            return
-        query, model, instructions, temperature = context
-
-        # Check cache
-        cached = await self.cache.aget(
-            query,
-            namespace=f"{self._namespace}:single-turn-v1",
-            model=model,
-            system_prompt=instructions,
-            temperature=temperature,
-        )
-        if cached is not None:
-            await self._send_cached_response(cached, send)
-            return
-
-        # Cache MISS — forward request and capture response
-        response_data = await self._forward_and_capture(scope, body, send)
-
-        # Cache the response
-        if self._cacheable_response(response_data):
-            await self.cache.aset(
-                query,
-                response_data,
-                namespace=f"{self._namespace}:single-turn-v1",
-                model=model,
-                system_prompt=instructions,
-                temperature=temperature,
-            )
-
-    @staticmethod
-    def _cacheable_response(response: Any) -> bool:
-        if not isinstance(response, dict):
-            return False
-        choices = response.get("choices")
-        if not isinstance(choices, list) or not choices:
-            return False
-        for choice in choices:
-            if not isinstance(choice, dict) or choice.get("finish_reason") not in (None, "stop"):
-                return False
-            message = choice.get("message")
-            if not isinstance(message, dict) or message.get("refusal") or message.get("tool_calls"):
-                return False
-            if not isinstance(message.get("content"), str):
-                return False
-        return True
-
-    def _extract_query(self, request_data: dict) -> str:
-        """
-        Extract the user query from a chat completion request.
-
-        Args:
-            request_data: Parsed JSON request body.
-
-        Returns:
-            The extracted query string, or empty string if not found.
-        """
-        messages = request_data.get("messages", [])
-        for msg in reversed(messages):
-            if isinstance(msg, dict) and msg.get("role") == "user":
-                return msg.get("content", "")
-        return ""
-
-    async def _read_body(self, receive: Callable) -> bytes:
-        """
-        Read the full request body from the ASGI receive callable.
-
-        Args:
-            receive: The ASGI receive callable.
-
-        Returns:
-            The complete request body as bytes.
-        """
-        body = b""
+        limit = self.cache.config.max_capture_bytes
+        frames = []
+        body = bytearray()
+        oversized = False
         while True:
             message = await receive()
-            if message["type"] == "http.request":
-                body += message.get("body", b"")
-                if not message.get("more_body", False):
-                    break
-            elif message["type"] == "http.disconnect":
+            frames.append(message)
+            if message["type"] == "http.disconnect":
+                await self.app(scope, self._replay(frames, receive), send)
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > limit:
+                oversized = True
                 break
-        return body
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+        original_replay = self._replay(frames, receive)
+        disconnected = False
 
-    async def _send_passthrough(self, scope: dict, body: bytes, send: Callable):
-        """
-        Forward the original request without caching.
+        async def replay():
+            nonlocal disconnected
+            message = await original_replay()
+            if message["type"] == "http.disconnect":
+                disconnected = True
+            return message
 
-        Reconstructs the ASGI receive callable with the captured body
-        and forwards to the upstream app.
-        """
+        data = None
+        reason = "unsupported_request_shape"
+        if not oversized:
+            try:
+                data = json.loads(
+                    body,
+                    object_pairs_hook=_object,
+                    parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Non-finite number")),
+                )
+            except (ValueError, UnicodeDecodeError):
+                pass
+        base = self.context
+        headers = {k.lower(): v for k, v in scope.get("headers", [])}
+        authenticated = bool(set(headers) & {b"authorization", b"cookie", b"x-api-key"})
+        if self.scope_resolver is not None and base is not None:
+            try:
+                resolved = self.scope_resolver(scope)
+                if inspect.iscoroutine(resolved):
+                    resolved.close()
+                base = replace(base, scope=resolved) if isinstance(resolved, RequestScope) else None
+            except Exception:
+                base = None
+        elif authenticated:
+            base = None
+        prepared = None
+        if isinstance(data, dict):
+            prepared, reason = prepare_request(data, base, "openai-dict-v1")
+        if prepared is None:
+            await self.app(scope, replay, self._decision_send(send, "BYPASS", reason))
+            return
+        query, ctx = prepared
+        decision = await self.cache.alookup(query, self.namespace, context=ctx)
+        if decision.outcome == "HIT":
+            encoded = json.dumps(decision.response, allow_nan=False).encode()
+            decorated = self._decision_send(send, "HIT", decision.reason, decision.similarity)
+            await decorated(
+                {
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [(b"content-type", b"application/json")],
+                }
+            )
+            await decorated({"type": "http.response.body", "body": encoded})
+            return
+        parts = []
+        size = 0
+        complete = False
+        safe = False
+        decorated = self._decision_send(send, decision.outcome, decision.reason)
 
-        async def receive_with_body():
-            return {
-                "type": "http.request",
-                "body": body,
-                "more_body": False,
-            }
-
-        await self.app(scope, receive_with_body, send)
-
-    async def _send_cached_response(self, cached_response: Any, send: Callable):
-        """
-        Send a cached response as an HTTP response.
-
-        Args:
-            cached_response: The cached response data.
-            send: The ASGI send callable.
-        """
-        response_body = json.dumps(cached_response, default=str).encode("utf-8")
-
-        await send(
-            {
-                "type": "http.response.start",
-                "status": 200,
-                "headers": [
-                    [b"content-type", b"application/json"],
-                    [b"x-longcache", b"HIT"],
-                ],
-            }
-        )
-        await send(
-            {
-                "type": "http.response.body",
-                "body": response_body,
-            }
-        )
-
-    async def _forward_and_capture(self, scope: dict, body: bytes, send: Callable) -> Optional[Any]:
-        """
-        Forward the request to the upstream app and capture the response.
-
-        Args:
-            scope: The ASGI scope.
-            body: The request body.
-            send: The original ASGI send callable.
-
-        Returns:
-            The parsed response data if successful, None otherwise.
-        """
-        response_parts = []
-        response_started = False
-        response_status = 200
-
-        async def capturing_send(message: dict):
-            nonlocal response_started, response_status
-
+        async def capture(message):
+            nonlocal size, complete, safe
             if message["type"] == "http.response.start":
-                response_started = True
-                response_status = message.get("status", 200)
-                # Only capture headers, pass through to real send
-                await send(message)
+                response_headers = [(k.lower(), v.lower()) for k, v in message.get("headers", [])]
+                names = {k for k, _ in response_headers}
+                control = b",".join(v for k, v in response_headers if k == b"cache-control")
+                media = [
+                    v.split(b";", 1)[0].strip() for k, v in response_headers if k == b"content-type"
+                ]
+                safe = (
+                    message.get("status") == 200
+                    and b"set-cookie" not in names
+                    and b"vary" not in names
+                    and b"no-store" not in control
+                    and b"private" not in control
+                    and media == [b"application/json"]
+                )
             elif message["type"] == "http.response.body":
-                response_parts.append(message.get("body", b""))
-                await send(message)
+                chunk = message.get("body", b"")
+                size += len(chunk)
+                if safe and size <= limit:
+                    parts.append(chunk)
+                else:
+                    safe = False
+                    parts.clear()
+                complete = not message.get("more_body", False)
+            await decorated(message)
 
-        async def receive_with_body():
-            return {
-                "type": "http.request",
-                "body": body,
-                "more_body": False,
-            }
+        await self.app(scope, replay, capture)
+        if safe and complete and not disconnected and decision.outcome != "BYPASS":
+            try:
+                response = json.loads(b"".join(parts), object_pairs_hook=_object)
+            except (ValueError, UnicodeDecodeError):
+                return
+            await self.cache.aset(query, response, self.namespace, context=ctx)
 
-        await self.app(scope, receive_with_body, capturing_send)
+    @staticmethod
+    def _replay(frames, receive):
+        iterator = iter(frames)
 
-        if response_status != 200:
-            return None
+        async def read():
+            try:
+                return next(iterator)
+            except StopIteration:
+                return await receive()
 
-        # Parse the captured response
-        full_response = b"".join(response_parts)
-        try:
-            return json.loads(full_response)
-        except (json.JSONDecodeError, TypeError):
-            return None
+        return read
 
-    def __repr__(self) -> str:
-        return f"LongCacheMiddleware(routes={self.cached_routes}, cache={self.cache!r})"
+    @staticmethod
+    def _decision_send(send, outcome, reason, similarity=None):
+        async def decorated(message):
+            if message["type"] == "http.response.start":
+                message = dict(message)
+                headers = [
+                    (k, v)
+                    for k, v in message.get("headers", [])
+                    if not k.lower().startswith(b"x-longcache")
+                ]
+                headers.extend(
+                    [(b"x-longcache", outcome.encode()), (b"x-longcache-reason", reason.encode())]
+                )
+                if similarity is not None:
+                    headers.append((b"x-longcache-similarity", f"{similarity:.6f}".encode()))
+                message["headers"] = headers
+            await send(message)
+
+        return decorated
 
 
 class StreamingCacheAdapter:
-    """
-    Adapter for caching streaming LLM responses.
+    """Compatibility pass-through; streaming cache replay is unsupported in v0.2."""
 
-    Collects streaming chunks into a complete response for caching,
-    and replays cached responses token-by-token to maintain the
-    streaming UX for end users.
+    cache_bypass_reason = "unsupported_request_shape"
 
-    Usage:
-        from longcache.middleware import StreamingCacheAdapter
-
-        def my_stream_func(query):
-            for chunk in llm.stream(query):
-                yield chunk
-
-        adapter = StreamingCacheAdapter(cache=LongCache(), stream_func=my_stream_func)
-        for token in adapter.stream("What is RAG?"):
-            print(token, end="")
-    """
-
-    def __init__(
-        self,
-        cache: LongCache,
-        stream_func: Callable,
-        namespace: str = "streaming",
-        replay_delay: float = 0.01,
-    ):
-        """
-        Initialize the streaming cache adapter.
-
-        Args:
-            cache: LongCache instance for storage.
-            stream_func: Callable that yields response chunks for a query.
-            namespace: Cache namespace for streaming entries.
-            replay_delay: Delay in seconds between replayed tokens
-                to simulate streaming pacing.
-        """
+    def __init__(self, cache, stream_func, namespace="streaming", replay_delay=0, **kwargs):
         self.cache = cache
         self.stream_func = stream_func
-        self._namespace = namespace
-        self._replay_delay = replay_delay
 
-    def stream(self, query: str):
-        """
-        Stream a response with caching.
+    def stream(self, query):
+        yield from self.stream_func(query)
 
-        On cache HIT, replays the cached response token-by-token.
-        On cache MISS, streams from the source, collects chunks,
-        and caches the assembled response.
-
-        Args:
-            query: The query string.
-
-        Yields:
-            Response tokens/chunks.
-        """
-        cached = self.cache.get(query, namespace=self._namespace)
-        if cached is not None:
-            # Replay cached response with realistic pacing
-            import time as _time
-            import re
-
-            cached_str = str(cached)
-            tokens = re.findall(r"\S+\s*", cached_str)
-            for token in tokens:
-                yield token
-                if self._replay_delay > 0:
-                    _time.sleep(self._replay_delay)
-            return
-
-        # Stream from source and collect
-        collected = []
-        for chunk in self.stream_func(query):
-            collected.append(str(chunk))
-            yield chunk
-
-        # Cache the assembled response
-        assembled = "".join(collected)
-        self.cache.set(query, assembled, namespace=self._namespace)
-
-    async def astream(self, query: str):
-        """
-        Async stream a response with caching.
-
-        Args:
-            query: The query string.
-
-        Yields:
-            Response tokens/chunks.
-        """
-        cached = self.cache.get(query, namespace=self._namespace)
-        if cached is not None:
-            import asyncio
-            import re
-
-            cached_str = str(cached)
-            tokens = re.findall(r"\S+\s*", cached_str)
-            for token in tokens:
-                yield token
-                if self._replay_delay > 0:
-                    await asyncio.sleep(self._replay_delay)
-            return
-
-        collected = []
+    async def astream(self, query):
         async for chunk in self.stream_func(query):
-            collected.append(str(chunk))
             yield chunk
-
-        assembled = "".join(collected)
-        self.cache.set(query, assembled, namespace=self._namespace)
-
-    def __repr__(self) -> str:
-        return f"StreamingCacheAdapter(cache={self.cache!r})"

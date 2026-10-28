@@ -10,6 +10,7 @@ switching to an IVF index.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 import threading
 from typing import Optional
 
@@ -112,6 +113,36 @@ class SimilarityIndex:
         """Async-safe version of add() for use in async contexts."""
         async with self._get_async_lock():
             self.add(vector, entry_id)
+
+    def candidates(self, vector, namespace, threshold, limit):
+        """Return scored eligible snapshots without recording hits or invoking hooks."""
+        with self._lock:
+            if self._faiss_index is None or self._faiss_index.ntotal == 0:
+                return []
+            if vector.shape != (self._dimension,):
+                raise ValueError("Incompatible embedding dimension")
+            total = self._faiss_index.ntotal
+            k = min(total, max(8, limit))
+            seen, result = set(), []
+            while True:
+                scores, ids = self._faiss_index.search(vector.reshape(1, -1), k)
+                for score, faiss_id in zip(scores[0], ids[0]):
+                    identifier = self._id_map.get(int(faiss_id))
+                    if identifier is None or identifier in seen or score < threshold:
+                        continue
+                    seen.add(identifier)
+                    entry = self._backend.retrieve(identifier)
+                    if (
+                        entry is not None
+                        and entry.namespace == namespace
+                        and not entry.is_expired()
+                    ):
+                        result.append((deepcopy(entry), float(score)))
+                        if len(result) >= limit:
+                            return result
+                if k == total or (len(scores[0]) and scores[0][-1] < threshold):
+                    return result
+                k = min(total, k * 2)
 
     def find_similar(
         self,

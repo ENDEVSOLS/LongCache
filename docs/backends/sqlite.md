@@ -1,31 +1,9 @@
-# SQLite Backend
+# SQLite
 
-The SQLite backend is the default storage engine for LongCache. It requires **zero external services** and stores entries in a single, robust disk database.
+The default path is `.longcache/v2/cache.db`. SQLite stores vectors, strict JSON response payloads, versioned identity metadata, tags, and a store manifest. WAL mode supports the declared single-process threading model.
 
-## Features
+A legacy file without format-2 metadata is refused before migration. Use a fresh path and preserve the old store for rollback. Back up live WAL databases with a consistent SQLite backup procedure.
 
-- **Zero Setup**: The database and necessary schema tables are created automatically on first run.
-- **WAL Mode**: Uses SQLite's Write-Ahead Logging (`PRAGMA journal_mode=WAL`) for concurrent reading without blocking writes.
-- **Thread-Safe**: Safely usable across multithreaded Python applications.
+Schema creation is transactional: an exception or process termination before commit rolls back partial initialization. Incompatible partial schemas are refused. A populated store with a missing manifest is refused rather than assigned a new identity; preserve it for diagnosis and use a fresh path.
 
-## Configuration
-
-```python
-from longcache import LongCache, CacheConfig
-
-config = CacheConfig(
-    backend="sqlite",
-    db_path="data/my_rag_cache.db",
-    max_entries=20000,
-    ttl_seconds=86400,
-)
-
-cache = LongCache(config)
-```
-
-## Database Schema
-
-LongCache automatically manages the following table structure in SQLite:
-
-- `entries`: Primary table containing entry IDs, namespace, raw query string, response payload, creation timestamp, and composite scope hash.
-- `metadata`: Key-value store tracking total hits, misses, and runtime metrics.
+Metadata-only counts/export/maintenance do not need model weights. Normal vector operations validate the persisted embedding manifest before index rebuild or writes.

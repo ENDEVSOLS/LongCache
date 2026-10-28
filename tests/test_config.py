@@ -71,15 +71,9 @@ class TestCacheConfigFromDict:
         assert config.backend == "redis"
         assert config.ttl_seconds == 7200
 
-    def test_from_dict_ignores_unknown_keys(self):
-        config = CacheConfig.from_dict(
-            {
-                "similarity_threshold": 0.85,
-                "totally_unknown_key": "should be dropped",
-            }
-        )
-        assert config.similarity_threshold == 0.85
-        assert not hasattr(config, "totally_unknown_key")
+    def test_from_dict_rejects_unknown_keys(self):
+        with pytest.raises(ValueError, match="Unknown configuration"):
+            CacheConfig.from_dict({"scope_polcy": "public"})
 
     def test_from_dict_empty_uses_defaults(self):
         config = CacheConfig.from_dict({})

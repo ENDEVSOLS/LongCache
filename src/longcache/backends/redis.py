@@ -36,14 +36,17 @@ class RedisCacheBackend(AbstractCacheBackend):
         result = backend.retrieve(entry_id)
     """
 
-    KEY_PREFIX = "longcache:entry"
-    NAMESPACE_SET = "longcache:namespaces"
-    ID_COUNTER = "longcache:id_counter"
+    ROOT = "longcache:v2:default:default"
+    KEY_PREFIX = ROOT + ":entry"
+    NAMESPACE_SET = ROOT + ":namespaces"
+    ID_COUNTER = ROOT + ":id_counter"
 
     def __init__(
         self,
         redis_url: str = "redis://localhost:6379/0",
         max_entries: int = 10_000,
+        cache_id: str = "default",
+        generation: str = "default",
     ):
         """
         Initialize the Redis backend.
@@ -60,10 +63,29 @@ class RedisCacheBackend(AbstractCacheBackend):
                 "Install with: uv pip install longcache[redis]"
             )
 
+        self.ROOT = f"longcache:v2:{cache_id}:{generation}"
+        self.KEY_PREFIX = self.ROOT + ":entry"
+        self.NAMESPACE_SET = self.ROOT + ":namespaces"
+        self.ID_COUNTER = self.ROOT + ":id_counter"
         self._redis_url = redis_url
         self._max_entries = max_entries
         self._lock = threading.RLock()
         self._client = redis.Redis.from_url(redis_url, decode_responses=True)
+
+    def read_manifest(self):
+        data = self._client.get(self.ROOT + ":manifest")
+        return json.loads(data) if data else None
+
+    def ensure_manifest(self, manifest: dict) -> None:
+        from longcache.core.identity import canonical
+
+        encoded = canonical(manifest)
+        key = self.ROOT + ":manifest"
+        if self._client.get(key) is None and self.list_all_entries():
+            raise ValueError("Missing storage manifest in nonempty cache; use a new generation")
+        self._client.set(key, encoded, nx=True)
+        if self._client.get(key) != encoded:
+            raise ValueError("Incompatible embedding or storage generation; use a new generation")
 
     def _entry_key(self, entry_id: int) -> str:
         """Get the Redis key for a cache entry."""
@@ -71,7 +93,7 @@ class RedisCacheBackend(AbstractCacheBackend):
 
     def _namespace_key(self, namespace: str) -> str:
         """Get the Redis key for a namespace's entry set."""
-        return f"longcache:ns:{namespace}"
+        return f"{self.ROOT}:ns:{namespace}"
 
     def close(self) -> None:
         """Release Redis connections owned by this backend."""
@@ -99,7 +121,7 @@ class RedisCacheBackend(AbstractCacheBackend):
             entry_id = self._client.incr(self.ID_COUNTER)
 
             vector_str = self._vector_to_str(entry.vector) if entry.vector is not None else ""
-            response_json = json.dumps(entry.response, default=str)
+            response_json = json.dumps(entry.response, allow_nan=False)
 
             entry_data = {
                 "id": entry_id,
@@ -114,6 +136,7 @@ class RedisCacheBackend(AbstractCacheBackend):
                 "system_prompt": entry.system_prompt,
                 "temperature": entry.temperature,
                 "tags": json.dumps(list(entry.tags or [])),
+                "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
             }
 
             key = self._entry_key(entry_id)
@@ -128,7 +151,7 @@ class RedisCacheBackend(AbstractCacheBackend):
 
             # Add to tag sets
             for tag in entry.tags or []:
-                pipe.sadd(f"longcache:tag:{entry.namespace}:{tag}", entry_id)
+                pipe.sadd(f"{self.ROOT}:tag:{entry.namespace}:{tag}", entry_id)
 
             # Set TTL on the Redis key if entry has expiry
             if entry.expires_at is not None:
@@ -204,6 +227,7 @@ class RedisCacheBackend(AbstractCacheBackend):
             system_prompt=data.get("system_prompt", ""),
             temperature=temperature,
             tags=tags,
+            metadata=json.loads(data.get("metadata", "{}")),
         )
 
     def delete(self, entry_id: int) -> bool:
@@ -266,7 +290,7 @@ class RedisCacheBackend(AbstractCacheBackend):
         Returns:
             The number of entries deleted.
         """
-        tag_key = f"longcache:tag:{namespace}:{tag}"
+        tag_key = f"{self.ROOT}:tag:{namespace}:{tag}"
         with self._lock:
             entry_ids = self._client.smembers(tag_key)
             if not entry_ids:

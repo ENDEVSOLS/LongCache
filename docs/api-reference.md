@@ -1,165 +1,60 @@
-# API Reference
+# Public interface
 
-## `LongCache`
+## Cache and identity
 
-The core semantic cache orchestrator.
+`LongCache(config=None, *, embedder=None, admit=None, verifier=None, context=None, metadata_only=False)` accepts explicit dependencies. Runtime hooks and scope resolvers are not serialized configuration.
 
-```python
-from longcache import LongCache, CacheConfig
+`RequestScope(tenant_id, user_id=None)` represents identity supplied by a trusted application. `RequestContext` is immutable and snapshots nested parameter mappings. Required fields are `scope`, `operation`, `provider`, `provider_scope`, `model`, and `prompt_version`. Optional fields include ordered `instructions`, `generation`, `corpus_version`, `document_versions`, `protected_entities`, `language`, `request_shape`, and `codec`.
 
-cache = LongCache(config=CacheConfig())
-```
+`Instruction(role, content)` accepts system/developer roles. Context instructions and generation options must describe the actual execution. The OpenAI adapter derives those fields from its supported request subset.
 
-### Constructor
+## Operations
 
-`LongCache(config: Optional[CacheConfig] = None)`
+| Method | Result and behavior |
+| ------ | ------------------- |
+| `lookup(query, namespace=None, *, context=None)` | `LookupDecision(outcome, reason, response, similarity, entry_id, threshold)` |
+| `alookup(...)` | Async decision-equivalent lookup |
+| `get(...)`, `aget(...)` | Decoded response or `None`; use lookup for reasons |
+| `set(query, response, namespace=None, ttl=None, tags=None, *, context=None)` | `StoreDecision(STORED or REJECTED, reason, entry_id)` |
+| `aset(...)` | Async storage with the same admission contract |
+| `cached(..., context=None, context_resolver=None)` | Query-only sync/async decorator; extra arguments bypass |
+| `cached_stream(...)` | Generator pass-through; no cache operations |
+| `inspect(query, *, context=None)` | Redacted decision dictionary; no hit accounting |
+| `invalidate(..., context=...)`, `invalidate_by_tag(tag, ..., context=...)` | Delete within one exact semantic partition |
+| `entries(..., context=..., operator=False)` | Owned scoped entries, or explicit trusted operator selection |
+| `stats(context=..., operator=False)` | Scoped process counters and stored-entry count |
+| `clear(operator=True)` | Explicitly clear the owned store |
+| `close()` / context manager | Stop owned background work and close calling-thread backend resources |
 
-* **`config`**: An instance of `CacheConfig`. If omitted, default SQLite configuration is used.
+`metadata_only=True` supports counts/export/maintenance without downloading an embedder; vector lookup/storage is rejected in this mode. CLI uses this for operator commands.
 
----
+## Configuration
 
-### Methods
+`CacheConfig` rejects unknown dictionary keys and invalid safety settings. Key defaults:
 
-#### `get(query: str, namespace: Optional[str] = None) -> Optional[str]`
-Checks the cache for a semantically similar query matching or exceeding `similarity_threshold`.
+| Field | Default |
+| ----- | ------- |
+| `scope_policy` | `private` (`tenant_shared` / `public` require explicit opt-in) |
+| `backend` | `sqlite` (`memory` / synchronous `redis` supported) |
+| `db_path` | `.longcache/v2/cache.db` |
+| `cache_id`, `generation` | `default`, `default` |
+| `policy_version` | `safe-reuse-v1` |
+| `similarity_threshold` | `0.92` |
+| `ttl_seconds`, `max_entries` | `3600`, `10000` per semantic partition |
+| `verification_budget` | `8` candidates |
+| `max_query_chars`, `max_capture_bytes` | `16384`, `1048576` |
+| `faiss_index_type` | `flat` (`hnsw` also supported) |
+| `embedder_model` | `BAAI/bge-small-en-v1.5` |
+| `embedder_revision` | Resolved downloaded commit; set explicitly for deployments |
 
-* **Parameters:**
-    * `query` (`str`): The query string to look up.
-    * `namespace` (`str`, optional): Override the default namespace.
-* **Returns:**
-    * Cached response string if HIT, or `None` if MISS.
+Legacy model/prompt/temperature fields are insufficient to establish trusted request identity. Explicit-context calls reject conflicting legacy keywords. Calls with a fixed cache context may map compatible legacy per-call keywords into that context; use `RequestContext` for new code.
 
----
+## Policy and embedding interfaces
 
-#### `set(query: str, response: str, namespace: Optional[str] = None, ttl: Optional[int] = None) -> None`
-Stores a query vector, text, and response payload in the cache.
+`PolicyDecision(action, reason)` has action `accept`, `reject`, or `abstain`. Admission receives `(context, normalized_response)`; verification receives `(query, candidate_query, normalized_response, similarity, context)`. Hook exceptions/invalid return values reject reuse or storage. Mandatory checks cannot be overridden.
 
-* **Parameters:**
-    * `query` (`str`): Original user query.
-    * `response` (`str`): Generated LLM response.
-    * `namespace` (`str`, optional): Specific namespace to store under.
-    * `ttl` (`int`, optional): Time to live in seconds. Overrides global `ttl_seconds`.
+`BaseEmbedder` requires `dimension`, `embed(text)`, and a stable `EmbeddingDescriptor(model, revision, dimension, preprocessing, normalization)`. Single vectors and batches must be contiguous float32 arrays with finite, L2-normalized rows and the declared dimension. Empty batches must have shape `(0, dimension)` and float32 dtype; they do not bypass dtype validation. The default batch implementation supports empty batches. Calls are serialized per embedder; malformed or incompatible vectors are rejected.
 
----
+See [architecture](how-it-works/architecture.md), [migration](migration-v0.2.md), and the [support matrix](index.md#supported-integrations) for limits.
 
-#### `cached(fn=None, *, namespace=None, ttl=None)`
-Decorator for synchronous and asynchronous functions. Automatically extracts query string, handles parameter hashing, and returns cached values.
-
-```python
-@cache.cached(namespace="support", ttl=3600)
-def ask_question(question: str) -> str:
-    return call_llm(question)
-```
-
----
-
-#### `stats(namespace: Optional[str] = None) -> dict`
-Returns real-time cache statistics:
-
-```python
-{
-    "hits": 1420,
-    "misses": 850,
-    "hit_rate": 0.625,
-    "total_entries": 850,
-    "estimated_tokens_saved": 710000,
-    "estimated_cost_saved_usd": 2.13,
-}
-```
-
----
-
-#### `clear(namespace: Optional[str] = None, all_namespaces: bool = False) -> None`
-Evicts entries from the cache.
-
----
-
-## `CacheConfig`
-
-Configuration dataclass for `LongCache`.
-
-```python
-from longcache import CacheConfig
-
-config = CacheConfig(
-    similarity_threshold=0.92,
-    ttl_seconds=3600,
-    max_entries=10000,
-    namespace="default",
-    embedder_model="BAAI/bge-small-en-v1.5",
-    backend="sqlite",
-    db_path=".longcache/cache.db",
-    redis_url="redis://localhost:6379/0",
-    track_stats=True,
-    faiss_index_type="flat",
-    hnsw_m=32,
-    hnsw_ef_search=64,
-    model="",
-    system_prompt="",
-    temperature=-1.0,
-)
-```
-
-### Parameter Reference
-
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `similarity_threshold` | `float` | `0.92` | Minimum cosine similarity (0.0 to 1.0) required for a cache hit |
-| `ttl_seconds` | `int` | `3600` | Expiration time in seconds (0 = no expiry) |
-| `max_entries` | `int` | `10000` | Maximum entries stored per namespace before eviction |
-| `namespace` | `str` | `"default"` | Logical partition namespace |
-| `embedder_model` | `str` | `"BAAI/bge-small-en-v1.5"` | HuggingFace sentence-transformers model name |
-| `backend` | `str` | `"sqlite"` | Supported storage backend: `"sqlite"`, `"redis"`, or `"memory"`; `"async_redis"` fails fast in v0.1.1 |
-| `db_path` | `str` | `".longcache/cache.db"` | Path to SQLite database file |
-| `redis_url` | `str` | `"redis://localhost:6379/0"` | Redis connection URL |
-| `track_stats` | `bool` | `True` | Track hits, misses, and cost statistics |
-| `faiss_index_type` | `str` | `"flat"` | Index type: `"flat"` (exact) or `"hnsw"` (approximate) |
-
----
-
-## `LocalEmbedder`
-
-Singleton embedding generator.
-
-```python
-from longcache.core.embedder import LocalEmbedder
-
-embedder = LocalEmbedder(model_name="BAAI/bge-small-en-v1.5")
-vector = embedder.embed("What is LongCache?")  # Returns np.ndarray shape (384,)
-```
-
-* `embed(text: str) -> np.ndarray`: Embeds and L2-normalizes the input string.
-* `dimension`: Returns vector dimension (384 for BGE-small).
-
----
-
-## Middleware & Framework Wrappers
-
-### `LongCacheMiddleware`
-```python
-from longcache.middleware import LongCacheMiddleware
-
-app.add_middleware(LongCacheMiddleware, cache=cache, cached_routes={"/v1/chat/completions"})
-```
-
-### `CachedLLM` & `CachedChain`
-```python
-from longcache.integrations.langchain import CachedLLM, CachedChain
-
-cached_llm = CachedLLM(llm, cache=cache)
-cached_chain = CachedChain(chain, cache=cache)
-```
-
-### `CachedQueryEngine`
-```python
-from longcache.integrations.llamaindex import CachedQueryEngine
-
-cached_engine = CachedQueryEngine(query_engine, cache=cache)
-```
-
-### `CachedOpenAI`
-```python
-from longcache.integrations.openai import CachedOpenAI
-
-cached_client = CachedOpenAI(openai_client, cache=cache)
-```
+For a decorated function, `answer.cache_context_for(base_context)` returns its immutable derived operation context. Use it for inspection, exports, or invalidation of that function's entries. Fixed contexts and per-call resolver contexts use the same derivation.

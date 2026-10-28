@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/ENDEVSOLS/LongCache/main/assets/logo.png" alt="LongCache Logo" width="320"/>
 </p>
 
-<p align="center"><strong>Semantic similarity cache for LLM and RAG pipelines — v0.1.1 beta.</strong></p>
+<p align="center"><strong>Semantic similarity cache for LLM and RAG pipelines .</strong></p>
 
 <p align="center">
 <a href="https://pypi.org/project/longcache/"><img src="https://img.shields.io/pypi/v/longcache" alt="PyPI Version"></a>
@@ -15,25 +15,25 @@
 </p>
 
 <p align="center">
-<a href="https://endevsols.github.io/LongCache/"><strong>📖 Documentation</strong></a> &nbsp;·&nbsp;
-<a href="https://endevsols.github.io/LongCache/getting-started/quickstart/"><strong>Quick Start</strong></a> &nbsp;·&nbsp;
-<a href="https://endevsols.github.io/LongCache/api-reference/"><strong>API Reference</strong></a> &nbsp;·&nbsp;
+<a href="https://endevsols.github.io/LongCache/"><strong>📖 Documentation</strong></a>  · 
+<a href="https://endevsols.github.io/LongCache/getting-started/quickstart/"><strong>Quick Start</strong></a>  · 
+<a href="https://endevsols.github.io/LongCache/api-reference/"><strong>API Reference</strong></a>  · 
 <a href="https://github.com/ENDEVSOLS/LongCache/blob/main/CHANGELOG.md"><strong>Changelog</strong></a>
 </p>
 
-**LongCache** reuses stored responses for semantically similar queries when their namespace and request context match. Python 3.10, 3.11, and 3.12 are tested. Measure response quality, latency, and savings on your own workload.
+**LongCache** reuses stored responses when trusted scope, execution context, response admission, and verification permit reuse. Python 3.11 and 3.12 are tested and  remains the Python 3.10-compatible line. Measure response quality, latency, and savings on your own workload.
 
 ---
 
 ## Why LongCache?
 
-| Problem | Solution |
-|---------|----------|
-| Repeated queries consume LLM tokens | Semantic cache intercepts similar queries before they reach the model |
-| Repeated LLM requests waste time and money | LongCache can reuse a stored answer when the request and context qualify |
-| String-match caches miss paraphrased queries | FAISS + BGE-small understands semantic meaning, not just exact tokens |
-| Most caches are coupled to one LLM provider | Works with LangChain, LangGraph, LlamaIndex, OpenAI, or raw functions |
-| Cross-model cache poisoning is a silent bug | Composite key scoping isolates entries per model, prompt, and temperature |
+| Problem                                      | Solution                                                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Repeated queries consume LLM tokens          | Semantic cache intercepts similar queries before they reach the model                                        |
+| Repeated LLM requests waste time and money   | LongCache can reuse a stored answer when the request and context qualify                                     |
+| String-match caches miss paraphrased queries | FAISS + BGE-small understands semantic meaning, not just exact tokens                                        |
+| Most caches are coupled to one LLM provider  | Scoped caching for supported OpenAI requests and raw functions; generic framework adapters pass through      |
+| Cross-model cache poisoning is a silent bug  | Immutable request identity isolates tenant/user, provider/model, instructions, settings, and source versions |
 
 **Results depend on the workload, hit quality, embedding cost, and cache configuration; measure savings in your own application.**
 
@@ -47,7 +47,7 @@
 # Core — SQLite backend + FAISS + BGE-small (no external services needed)
 uv pip install longcache
 
-# With LangChain + LangGraph integration
+# With LangChain + LangGraph compatibility adapters (pass-through in v0.2)
 uv pip install longcache[langchain]
 
 # With Redis response storage (FAISS index remains local to this process)
@@ -59,14 +59,21 @@ uv pip install longcache[all]
 
 > **Offline-friendly**: LongCache embeds queries locally. After the BGE-small model weights are downloaded on first run, no internet connection is required.
 
-If you change `embedder_model` for a persistent cache, clear its existing entries first. Vectors from different embedding models are not interchangeable, even when they have the same number of dimensions.
-
 ### 30-Second Example
 
 ```python
-from longcache import LongCache
+from longcache import LongCache, RequestContext, RequestScope
 
-cache = LongCache()
+context = RequestContext(
+    scope=RequestScope(tenant_id="your-tenant", user_id="your-user"),
+    operation="support.answer",
+    provider="your-provider",
+    provider_scope="your-deployment-v1",
+    model="your-model",
+    prompt_version="support-v1",
+    corpus_version="knowledge-v1",
+)
+cache = LongCache(context=context)
 
 
 @cache.cached
@@ -80,11 +87,13 @@ result1 = my_rag_chain("What is your refund policy?")
 # Second call — exact query: HIT → cached response
 result2 = my_rag_chain("What is your refund policy?")
 
-# Third call — paraphrase: HIT if the similarity threshold is met
+# Third call — paraphrase: HIT only if similarity and verification both pass
 result3 = my_rag_chain("How do I get a refund?")
 ```
 
-Async functions are detected automatically — no additional setup needed:
+Obtain scope from trusted authentication state and use context values matching the actual provider execution. Missing identity bypasses caching. When RAG documents change, snapshot their revisions in `corpus_version` / `document_versions` before lookup and generation; see the [changing-document RAG guide](docs/integrations/versioned-rag.md).
+
+Async functions are detected automatically and use the same explicit context:
 
 ```python
 @cache.cached(namespace="faq", ttl=7200)
@@ -109,7 +118,7 @@ async def my_async_chain(query: str) -> str:
 │  └────────┬──────────┘                                       │
 │           │ 384-dim vector                                   │
 │           ▼                                                  │
-│  ┌───────────────────┐    HIT (similarity ≥ threshold)       │
+│  ┌───────────────────┐    HIT (scope + policy verified)       │
 │  │  SimilarityIndex  │ ─────────────────────────────────▶   │
 │  │  FAISS + Backend  │         Return cached response        │
 │  └────────┬──────────┘                                       │
@@ -127,11 +136,11 @@ async def my_async_chain(query: str) -> str:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-1. **Intercept** — queries are checked before they reach the LLM
+1. **Intercept** — validate trusted scope and supported request shape before embedding
 2. **Embed** — the query is embedded locally with BGE-small (no embedding API call)
 3. **Search** — FAISS searches for cosine similarity against cached vectors
-4. **HIT** (similarity ≥ threshold): return the cached response
-5. **MISS**: run the full pipeline, cache the result, and return it
+4. **HIT**: verify the candidate and decode an eligible response before serving it
+5. **MISS**: run the full pipeline, admit an eligible result, and return it; unsupported requests **BYPASS** caching
 
 ---
 
@@ -147,23 +156,24 @@ from longcache import LongCache, CacheConfig
 config = CacheConfig(
     similarity_threshold=0.92,  # 0.0–1.0; higher = stricter matching
     ttl_seconds=3600,  # Entry lifetime in seconds (0 = never expire)
-    max_entries=10_000,  # Max entries per namespace (LRU eviction)
+    max_entries=10_000,  # Max entries per semantic partition (oldest evicted first)
     namespace="default",  # Logical isolation group
     embedder_model="BAAI/bge-small-en-v1.5",  # Local embedding model
     backend="sqlite",  # "sqlite" | "redis" | "memory"
-    db_path=".longcache/cache.db",  # SQLite path (auto-creates parent dirs)
+    db_path=".longcache/v2/cache.db",  # SQLite path (auto-creates parent dirs)
     redis_url="redis://localhost:6379/0",  # Redis connection URL
-    track_stats=True,  # Track hits, misses, and cost savings
+    track_stats=True,  # Track process-local hit/miss counters
     faiss_index_type="flat",  # "flat" (exact) | "hnsw" (approximate, faster at scale)
     hnsw_m=32,  # HNSW connections per node
     hnsw_ef_search=64,  # HNSW search depth
-    # Composite key context (isolates entries per model/persona)
+    scope_policy="private",  # Trusted tenant + user required; sharing is explicit
+    # Legacy execution fields below do not replace RequestContext
     model="",  # LLM model identifier (e.g. "gpt-4o")
     system_prompt="",  # System prompt string
     temperature=-1.0,  # Sampling temperature (-1.0 = unset)
 )
 
-cache = LongCache(config)
+cache = LongCache(config, context=context)
 ```
 
 ### From a Dictionary
@@ -190,18 +200,18 @@ export LONGCACHE_MODEL=gpt-4o
 
 ```python
 config = CacheConfig.from_env()  # Reads all LONGCACHE_* env vars automatically
-cache = LongCache(config)
+cache = LongCache(config, context=context)
 ```
 
 ### Similarity Threshold Guide
 
-| Threshold | Behavior | Recommended Use Case |
-|-----------|----------|----------------------|
-| 0.99 | Near-exact match only | Precise FAQ lookup |
-| 0.95 | Very similar phrasing | Customer support |
+| Threshold      | Behavior                      | Recommended Use Case            |
+| -------------- | ----------------------------- | ------------------------------- |
+| 0.99           | Near-exact match only         | Precise FAQ lookup              |
+| 0.95           | Very similar phrasing         | Customer support                |
 | **0.92** | **Default — balanced** | **General RAG pipelines** |
-| 0.85 | Looser matching | Exploratory search |
-| 0.75 | Topic-level clustering | Broad domain matching |
+| 0.85           | Looser matching               | Exploratory search              |
+| 0.75           | Topic-level clustering        | Broad domain matching           |
 
 **Tip:** Start at 0.92 and adjust based on your observed hit rate vs. false-positive rate.
 
@@ -211,35 +221,35 @@ cache = LongCache(config)
 
 ### Core
 
-- ✅ **Semantic Similarity Cache:** Understands paraphrased queries — “How do I return a product?” hits the same cache entry as “What’s your return process?”
+- ✅ **Semantic Similarity Cache:** Finds paraphrase candidates, then checks scope and reuse policy before serving an answer.
 - ✅ **Local Embedding:** BAAI/bge-small-en-v1.5 runs on-device after its first download; latency depends on hardware.
-- ✅ **`@cache.cached` Decorator:** One-line caching for any sync or async function — auto-detects coroutines
-- ✅ **`@cache.cached_stream` Decorator:** Caches streaming generator responses (sync and async); yields live on MISS, replays from cache on HIT
-- ✅ **Composite Cache Keys:** Scopes entries per `model`, `system_prompt`, and `temperature` via SHA-256 fingerprint — prevents cross-model cache poisoning
-- ✅ **Tag-Based Invalidation:** Attach tags to entries at write time; selectively invalidate by tag without clearing entire namespaces
+- ✅ **`@cache.cached` Decorator:** Scoped caching for query-only sync or async functions; additional arguments bypass
+- ✅ **`@cache.cached_stream` Decorator:** Preserves sync/async generator interfaces as pass-through; no cache reads or writes in v0.2
+- ✅ **Composite Cache Keys:** Full SHA-256 identity includes trusted scope, execution settings, versions, codec, policy, and embedding generation
+- ✅ **Tag-Based Invalidation:** Attach tags to entries at write time; invalidate by tag within the exact scoped execution context
 - ✅ **Per-Entry TTL:** Override TTL per `set()` call or decorator — supports never-expire (`ttl=0`) and short-lived entries
-- ✅ **LRU Eviction:** Configurable `max_entries` per namespace; oldest entries evicted automatically when the limit is reached
+- ✅ **LRU Eviction:** Configurable `max_entries` per semantic partition; oldest entries evicted when the limit is reached
 
 ### Reliability
 
 - ✅ **Thread-Safe Statistics:** Hit/miss counts protected by a dedicated lock; safe under 8+ concurrent threads
-- ✅ **Persistent Stats:** Hit/miss/savings data written to SQLite and survives process restarts
+- ✅ **Accepted-Hit Accounting:** Process counters reset on restart; stored entry hit counts persist, and unmeasured savings remain zero
 - ✅ **Rebuild-Safe FAISS Index:** Index is fully rebuilt after TTL sweeps or evictions — prevents stale vector accumulation
-- ✅ **Background TTL Sweeper:** Daemon thread runs every 5 minutes to delete expired entries; shuts down cleanly on GC
-- ✅ **Correct Miss Counting:** `get()`, `aget()`, and all decorators record misses accurately in all code paths
+- ✅ **Background TTL Sweeper:** Daemon thread runs every 5 minutes to delete expired entries; stops when the cache is closed
+- ✅ **Correct Miss Counting:** Supported eligible lookups count hits only after successful verification and decoding
 - ✅ **Config Validation:** `CacheConfig` validates all fields on construction with clear error messages
 
 ### Integrations & Backends
 
-- ✅ **SQLite Backend:** Zero external dependencies, WAL-mode thread safety, persistent stats, default for all deployments
-- ✅ **Redis Backend:** Shared cache across multiple instances/pods, atomic TTL via `EXPIRE` (sync)
-- ✅ **Async Redis Backend:** Non-blocking Redis — safe inside `asyncio` event loops (FastAPI, etc.)
+- ✅ **SQLite Backend:** No external service, WAL mode, versioned manifests, transactional initialization; default backend
+- ✅ **Redis Backend:** Versioned durable response storage with TTL; one LongCache process per generation
+- ✅ **Async Redis Backend:** Experimental standalone storage interface; unsupported through `LongCache`
 - ✅ **In-Memory Backend:** Zero I/O, ideal for unit tests and CI/CD pipelines
-- ✅ **LangChain Integration:** `CachedLLM` and `CachedChain` — drop-in wrappers with sync, async, and streaming support
-- ✅ **LangGraph Integration:** `CachedState` node for graph-based agents; async variants included
-- ✅ **LlamaIndex Integration:** `CachedQueryEngine` wraps any LlamaIndex query engine
-- ✅ **OpenAI Integration:** `CachedOpenAI` wraps the OpenAI client directly
-- ✅ **FastAPI Middleware:** `LongCacheMiddleware` caches entire HTTP routes; `X-LongCache: HIT` header on cached responses
+- ✅ **LangChain Integration:** `CachedLLM` and `CachedChain` compatibility wrappers; pass-through in v0.2
+- ✅ **LangGraph Integration:** `CachedState` compatibility interface; graph state is not cached in v0.2
+- ✅ **LlamaIndex Integration:** `CachedQueryEngine` preserves the engine interface without caching opaque state
+- ✅ **OpenAI Integration:** Supported single-turn text requests with explicit context; sync/async dict and SDK replay
+- ✅ **FastAPI Middleware:** Bounded supported chat-completion JSON with trusted scope resolution and diagnostic headers
 - ✅ **CLI:** `longcache stats`, `clear`, `inspect`, `export` — manage the cache without writing code
 
 ---
@@ -252,16 +262,16 @@ cache = LongCache(config)
 cache = LongCache(
     CacheConfig(
         backend="sqlite",
-        db_path=".longcache/cache.db",  # Auto-creates parent directories
+        db_path=".longcache/v2/cache.db",  # Auto-creates parent directories
     )
 )
 ```
 
-| | |
-|---|---|
-| **Pros** | Zero external deps, persistent, WAL-mode thread safety, stats survive restarts |
-| **Cons** | Single-machine only |
-| **Best for** | Development, single-process applications, CLI tools |
+|                    |                                                                                                |
+| ------------------ | ---------------------------------------------------------------------------------------------- |
+| **Pros**     | No external service, persistent entries/hit counts, WAL mode, compatible-generation validation |
+| **Cons**     | Single-machine only                                                                            |
+| **Best for** | Development, single-process applications, CLI tools                                            |
 
 ### Redis (Shared Storage)
 
@@ -279,15 +289,15 @@ cache = LongCache(
 )
 ```
 
-| | |
-|---|---|
-| **Pros** | Shared response storage and Redis key expiry |
-| **Cons** | Requires Redis; each LongCache process keeps its own FAISS index, so cross-process writes are not synchronized |
-| **Best for** | A single cache process using Redis for durable response storage |
+|                    |                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- |
+| **Pros**     | Shared response storage and Redis key expiry                                                                   |
+| **Cons**     | Requires Redis; each LongCache process keeps its own FAISS index, so cross-process writes are not synchronized |
+| **Best for** | A single cache process using Redis for durable response storage                                                |
 
 ### Async Redis backend status
 
-`AsyncRedisCacheBackend` can be used and tested as a standalone storage backend. It is not supported through `LongCache` in v0.1.1; selecting `backend="async_redis"` fails immediately. End-to-end async Redis integration is planned for a later release.
+`AsyncRedisCacheBackend` can be used and tested as a standalone storage backend. It is not supported through `LongCache` in v0.2.0; selecting `backend="async_redis"` fails immediately. End-to-end async Redis integration is planned for a later release.
 
 ### In-Memory (Testing & CI)
 
@@ -295,15 +305,17 @@ cache = LongCache(
 cache = LongCache(CacheConfig(backend="memory"))
 ```
 
-| | |
-|---|---|
-| **Pros** | Fastest possible, zero I/O, no files created |
-| **Cons** | Lost on process restart, single-process only |
-| **Best for** | Unit tests, CI/CD pipelines, benchmarks |
+|                    |                                              |
+| ------------------ | -------------------------------------------- |
+| **Pros**     | Fastest possible, zero I/O, no files created |
+| **Cons**     | Lost on process restart, single-process only |
+| **Best for** | Unit tests, CI/CD pipelines, benchmarks      |
 
 ---
 
 ## Integrations
+
+**v0.2 support:** generic LangChain, LangGraph, and LlamaIndex adapters below preserve their interfaces but bypass cache reads/writes. Use the explicit-context manual/decorator path for caching proven application workflows. All streaming helpers also pass through.
 
 ### LangChain
 
@@ -402,14 +414,14 @@ uv pip install longcache[openai]
 from openai import OpenAI
 from longcache.integrations.openai import CachedOpenAI
 
-client = CachedOpenAI(OpenAI(api_key="sk-..."), cache=LongCache())
+client = CachedOpenAI(OpenAI(), cache=LongCache(), context=context)
 response = client.chat.completions.create(
     model="gpt-4o",
     messages=[{"role": "user", "content": "What is RAG?"}],
 )
 ```
 
-In v0.1.1, the OpenAI wrapper and ASGI middleware cache only single-turn text requests with an explicit model and supported parameters. Multi-turn, tool, multimodal, and streaming requests bypass the cache. The middleware also bypasses requests with Authorization, Cookie, or X-API-Key headers. Use a separate `CachedOpenAI` namespace per tenant or user when responses may contain private data; automatic tenant scoping is planned for a later release.
+In v0.2.0, OpenAI caching requires a complete trusted context and the supported single-turn text subset. Multi-turn, tool, multimodal, structured-output, streaming, and unknown-parameter requests bypass. Complete responses require `finish_reason="stop"`. For varying identities, pass `cache_context=per_request_context`; namespaces alone do not establish tenant isolation.
 
 ---
 
@@ -428,12 +440,15 @@ app = FastAPI()
 app.add_middleware(
     LongCacheMiddleware,
     cache=LongCache(),
+    context=context,  # Execution template from the quick start
+    scope_resolver=lambda scope: scope["state"]["request_scope"],
     cached_routes={"/v1/chat/completions"},
 )
 
-# Supported single-turn text requests with an explicit model may be cached.
+# Authentication middleware must populate state["request_scope"] with a trusted RequestScope.
+# Resolver failure bypasses; only complete eligible bounded JSON responses are stored.
 # X-LongCache: HIT  →  cached response served
-# X-LongCache: (absent) →  fresh LLM response
+# X-LongCache: MISS/BYPASS → upstream response; admission is checked afterward
 ```
 
 ### Streaming Cache Adapter
@@ -449,11 +464,11 @@ def my_stream(query: str):
 
 adapter = StreamingCacheAdapter(cache, my_stream)
 
-# MISS — streams from LLM, saves full response in cache
+# Pass-through — streams from LLM without cache storage
 for token in adapter.stream("What is RAG?"):
     print(token, end="")
 
-# HIT — replays cached response with streaming pacing
+# Repeated calls also reach the LLM; streaming replay is unsupported in v0.2
 for token in adapter.stream("What is RAG?"):
     print(token, end="")
 ```
@@ -462,52 +477,49 @@ for token in adapter.stream("What is RAG?"):
 
 ## CLI
 
-LongCache ships a command-line tool for cache management and inspection:
+LongCache ships a command-line tool for cache management and inspection. Supply a JSON `RequestContext` via `--context-file`; see the [CLI guide](docs/cli.md). Whole-store operations require explicit operator mode:
 
 ```bash
 # View cache statistics (hits, misses, hit rate, estimated savings)
-longcache stats
-longcache stats --namespace faq
+longcache stats --context-file context.json
+longcache stats --namespace faq --context-file context.json
 
 # Clear a namespace
-longcache clear --namespace faq --yes
+longcache clear --namespace faq --context-file context.json --yes
 
 # Clear the entire cache
-longcache clear --all --yes
+longcache clear --all --operator --yes
 
 # Inspect the nearest cached entry for a query
-longcache inspect --query "refund policy"
+longcache inspect --query "refund policy" --context-file context.json
 
 # Export cache entries as JSON
-longcache export --format json
-longcache export --namespace faq -o faq_cache.json
+longcache export --context-file context.json --format json
+longcache export --namespace faq --context-file context.json -o faq_cache.json
 ```
 
 ---
 
 ## API Reference
 
-### `LongCache(config=None)`
+### `LongCache(config=None, *, context=None, embedder=None, admit=None, verifier=None, metadata_only=False)`
 
-Main facade class. Accepts an optional `CacheConfig`; uses development defaults otherwise.
+Main facade class. Accepts an optional `CacheConfig` and explicit request context, embedder, and synchronous policy hooks. Missing identity bypasses caching.
 
 #### Core Methods
 
-| Method | Description |
-|--------|-------------|
-| `get(query, namespace, model, system_prompt, temperature)` | Check cache. Returns cached response or `None`. Increments miss count on MISS. |
-| `set(query, response, namespace, ttl, tags, model, system_prompt, temperature)` | Store a query-response pair with optional tags and context scope. |
-| `aget(...)` | Async version of `get()`. Non-blocking. |
-| `aset(...)` | Async version of `set()`. Non-blocking. |
-| `cached(func, *, namespace, ttl, tags, model, system_prompt, temperature)` | Decorator for sync **and** async functions. |
-| `cached_stream(func, *, namespace, ttl, tags, model, system_prompt, temperature)` | Decorator for sync/async **generator** functions (streaming LLMs). |
-| `invalidate(namespace, model, system_prompt, temperature)` | Delete all entries in a namespace. Returns count deleted. |
-| `invalidate_by_tag(tag, namespace, ...)` | Delete all entries carrying a given tag. Returns count deleted. |
-| `clear()` | Clear the entire cache across all namespaces. Returns count. |
-| `stats()` | Returns hit rate, miss count, estimated tokens saved, estimated cost saved, and total entries. |
-| `inspect(query, namespace, ...)` | Find nearest cached entry without returning it. Useful for debugging. |
-| `record_hit()` | Manually record a cache hit (thread-safe). For custom integrations. |
-| `record_miss(elapsed_ms)` | Manually record a cache miss with elapsed generation time (thread-safe). |
+| Method                                                                         | Description                                                                           |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| `lookup(query, ..., context=...)`, `alookup(...)`                          | Typed `HIT` / `MISS` / `BYPASS` decision with reason and decoded response.      |
+| `get(query, ..., context=...)`, `aget(...)`                                | Decoded response or `None`; same lookup policy.                                     |
+| `set(query, response, ..., context=...)`, `aset(...)`                      | `StoreDecision` with `STORED` / `REJECTED`; strict admission and serialization. |
+| `cached(..., context=..., context_resolver=...)`                             | Query-only sync/async decorator; extra arguments bypass.                              |
+| `cached_stream(...)`                                                         | Sync/async generator pass-through; no caching.                                        |
+| `invalidate(..., context=...)`, `invalidate_by_tag(tag, ..., context=...)` | Delete only within the exact scoped execution context.                                |
+| `clear(operator=True)`                                                       | Explicit whole-store clearing.                                                        |
+| `stats(context=...)`                                                         | Scoped process counters and stored-entry count.                                       |
+| `inspect(query, ..., context=...)`                                           | Redacted decision/score dictionary without hit accounting.                            |
+| `close()` / context manager                                                  | Release owned background work and backend resources.                                  |
 
 #### `@cache.cached` Decorator Options
 
@@ -516,14 +528,12 @@ Main facade class. Accepts an optional `CacheConfig`; uses development defaults 
     namespace="faq",  # Logical isolation group
     ttl=7200,  # Entry lifetime override (seconds)
     tags=["billing"],  # Tags for selective invalidation
-    model="gpt-4o",  # Scopes entries to this model
-    system_prompt="...",  # Scopes entries to this system prompt
-    temperature=0.0,  # Scopes entries to this temperature
+    context=context,  # Complete trusted execution context
 )
 def my_chain(query: str) -> str: ...
 ```
 
-Works identically for `@cache.cached_stream`.
+Use a per-call `context_resolver` when trusted identity varies. For matching inspection/invalidation, derive the decorator context with `my_chain.cache_context_for(context)`. Streaming decorators do not cache in v0.2.
 
 #### `stats()` Return Value
 
@@ -532,57 +542,60 @@ Works identically for `@cache.cached_stream`.
     "hits": 420,
     "misses": 180,
     "hit_rate": 0.70,
-    "total_saved_ms": 840_000.0,
-    "estimated_tokens_saved": 630_000,
-    "estimated_cost_saved_usd": 18.90,
+    "total_saved_ms": 0.0,
+    "estimated_tokens_saved": 0,
+    "estimated_cost_saved_usd": 0.0,
     "total_entries": 95,
 }
 ```
 
-Statistics are protected by a reentrant threading lock and persisted to the SQLite backend — they survive process restarts.
+Process hit/miss counters reset on restart; stored entry hit counts persist. Unmeasured timing/token/cost savings remain zero.
 
 ---
 
 ### `CacheConfig` Field Reference
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `similarity_threshold` | `float` | `0.92` | Cosine similarity threshold for cache hits (0.0–1.0) |
-| `ttl_seconds` | `int` | `3600` | Entry lifetime in seconds. `0` = never expire |
-| `max_entries` | `int` | `10_000` | Max entries per namespace (LRU eviction) |
-| `namespace` | `str` | `"default"` | Default namespace |
-| `embedder_model` | `str` | `"BAAI/bge-small-en-v1.5"` | Local sentence-transformers model |
-| `backend` | `str` | `"sqlite"` | `"sqlite"`, `"redis"`, `"memory"` through `LongCache` |
-| `db_path` | `str` | `".longcache/cache.db"` | SQLite database path |
-| `redis_url` | `str` | `"redis://localhost:6379/0"` | Redis connection URL |
-| `track_stats` | `bool` | `True` | Track hit/miss stats (thread-safe, persisted in SQLite) |
-| `faiss_index_type` | `str` | `"flat"` | `"flat"` (exact) or `"hnsw"` (approximate) |
-| `hnsw_m` | `int` | `32` | HNSW connections per node (higher = more accurate, more memory) |
-| `hnsw_ef_search` | `int` | `64` | HNSW search depth (higher = more accurate, slower) |
-| `model` | `str` | `""` | Global model identifier for composite key scoping |
-| `system_prompt` | `str` | `""` | Global system prompt for composite key scoping |
-| `temperature` | `float` | `-1.0` | Global temperature for composite key scoping (`-1.0` = unset) |
+| Field                        | Type      | Default                        | Description                                                                         |
+| ---------------------------- | --------- | ------------------------------ | ----------------------------------------------------------------------------------- |
+| `similarity_threshold`     | `float` | `0.92`                       | Cosine similarity threshold for cache hits (0.0–1.0)                               |
+| `ttl_seconds`              | `int`   | `3600`                       | Entry lifetime in seconds. `0` = never expire                                     |
+| `max_entries`              | `int`   | `10_000`                     | Max entries per semantic partition; oldest entries evicted first                    |
+| `namespace`                | `str`   | `"default"`                  | Default namespace                                                                   |
+| `embedder_model`           | `str`   | `"BAAI/bge-small-en-v1.5"`   | Local sentence-transformers model                                                   |
+| `backend`                  | `str`   | `"sqlite"`                   | `"sqlite"`, `"redis"`, `"memory"` through `LongCache`                       |
+| `db_path`                  | `str`   | `".longcache/v2/cache.db"`   | SQLite database path                                                                |
+| `redis_url`                | `str`   | `"redis://localhost:6379/0"` | Redis connection URL                                                                |
+| `track_stats`              | `bool`  | `True`                       | Track process-local hit/miss counters                                               |
+| `faiss_index_type`         | `str`   | `"flat"`                     | `"flat"` (exact) or `"hnsw"` (approximate)                                      |
+| `hnsw_m`                   | `int`   | `32`                         | HNSW connections per node (higher = more accurate, more memory)                     |
+| `hnsw_ef_search`           | `int`   | `64`                         | HNSW search depth (higher = more accurate, slower)                                  |
+| `scope_policy`             | `str`   | `"private"`                  | Trusted tenant/user scope; `tenant_shared` and `public` require explicit opt-in |
+| `cache_id`, `generation` | `str`   | `"default"`                  | Owned Redis keyspace and storage generation                                         |
+| `verification_budget`      | `int`   | `8`                          | Maximum candidates checked per lookup                                               |
+| `model`                    | `str`   | `""`                         | Legacy execution field; does not replace trusted context                            |
+| `system_prompt`            | `str`   | `""`                         | Global system prompt for composite key scoping                                      |
+| `temperature`              | `float` | `-1.0`                       | Global temperature for composite key scoping (`-1.0` = unset)                     |
 
 ---
 
 ### `CacheEntry` Field Reference
 
-Returned by `inspect()` and used internally by all backends.
+Used internally by backends and available through scoped `entries(context=...)`. `inspect()` returns a redacted decision dictionary, not a `CacheEntry`.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | `int \| None` | Backend-assigned unique identifier |
-| `namespace` | `str` | Effective namespace (includes composite key suffix if set) |
-| `query` | `str` | Original query text |
-| `vector` | `np.ndarray` | 384-dim L2-normalized float32 embedding |
-| `response` | `Any` | Cached LLM response (must be JSON-serializable) |
-| `created_at` | `float` | Unix timestamp of entry creation |
-| `expires_at` | `float \| None` | Unix timestamp of expiry (`None` = no expiry) |
-| `hit_count` | `int` | Number of times this entry has been served |
-| `model` | `str` | Model identifier at write time |
-| `system_prompt` | `str` | System prompt at write time |
-| `temperature` | `float` | Temperature at write time (`-1.0` = unset) |
-| `tags` | `list[str]` | Tags for selective invalidation |
+| Field             | Type             | Description                                     |
+| ----------------- | ---------------- | ----------------------------------------------- |
+| `id`            | `int \| None`   | Backend-assigned unique identifier              |
+| `namespace`     | `str`          | Canonical scoped execution partition            |
+| `query`         | `str`          | Original query text                             |
+| `vector`        | `np.ndarray`   | 384-dim L2-normalized float32 embedding         |
+| `response`      | `Any`          | Cached LLM response (must be JSON-serializable) |
+| `created_at`    | `float`        | Unix timestamp of entry creation                |
+| `expires_at`    | `float \| None` | Unix timestamp of expiry (`None` = no expiry) |
+| `hit_count`     | `int`          | Number of times this entry has been served      |
+| `model`         | `str`          | Model identifier at write time                  |
+| `system_prompt` | `str`          | System prompt at write time                     |
+| `temperature`   | `float`        | Temperature at write time (`-1.0` = unset)    |
+| `tags`          | `list[str]`    | Tags for selective invalidation                 |
 
 ---
 
@@ -598,34 +611,31 @@ chat_cache = LongCache(CacheConfig(namespace="general", similarity_threshold=0.8
 ### Per-Entry TTL Override
 
 ```python
-cache.set("volatile_query", response, ttl=300)  # 5-minute TTL
-cache.set("stable_query", response, ttl=86400)  # 24-hour TTL
-cache.set("permanent", response, ttl=0)  # Never expires
+cache.set("volatile_query", response, ttl=300, context=context)  # 5-minute TTL
+cache.set("stable_query", response, ttl=86400, context=context)  # 24-hour TTL
+cache.set("permanent", response, ttl=0, context=context)  # Never expires
 ```
 
 ### Cache Invalidation Patterns
 
 ```python
-# Clear a specific namespace
-cache.invalidate("faq")
+# Clear entries within the exact context and namespace
+cache.invalidate("faq", context=context)
 
-# Clear entries scoped to a specific model
-cache.invalidate("faq", model="gpt-4o")
+# Invalidate a tag within the same context
+cache.invalidate_by_tag("doc:refund_v2", context=context)
 
-# Invalidate by tag (e.g., after a document update)
-cache.invalidate_by_tag("doc:refund_v2")
-
-# Nuclear option — clear everything
-cache.clear()
+# Explicit operator access to the whole owned store
+cache.clear(operator=True)
 ```
 
 ### Async Manual Control
 
 ```python
-cached = await cache.aget("What is your refund policy?")
+cached = await cache.aget("What is your refund policy?", context=context)
 if cached is None:
     result = await my_pipeline("What is your refund policy?")
-    await cache.aset("What is your refund policy?", result, tags=["policy"])
+    await cache.aset("What is your refund policy?", result, tags=["policy"], context=context)
 ```
 
 ### HNSW Index for Large Caches (100K+ Entries)
@@ -644,35 +654,23 @@ cache = LongCache(
 ### Inspecting the Cache
 
 ```python
-entry = cache.inspect("refund policy")
-# {
-#   'id': 42,
-#   'query': 'What is your refund policy?',
-#   'namespace': 'default',
-#   'hit_count': 7,
-#   'tags': ['billing', 'policy'],
-#   'model': 'gpt-4o',
-#   'created_at': 1700000000.0,
-#   'expires_at': None,
-#   'is_expired': False,
-# }
+decision = cache.inspect("refund policy", context=context)
+# Redacted keys: outcome, reason, similarity, id, threshold, format_version.
+# No raw query/response, and no hit increment.
 ```
 
-### Custom Integration: Manual Hit/Miss Recording
+### Custom Integration: Decision-Based Control
 
-For custom wrappers that call `get()`/`set()` manually:
+Hit accounting is automatic; `record_hit`, `record_miss`, and `track_miss` were removed in v0.2.
 
 ```python
-result = cache.get(query, track_miss=False)
-if result is not None:
-    cache.record_hit()
+def answer(query):
+    decision = cache.lookup(query, context=context)
+    if decision.outcome == "HIT":
+        return decision.response
+    result = my_pipeline(query)
+    cache.set(query, result, context=context)  # Returns STORED or REJECTED.
     return result
-
-t0 = time.time()
-result = my_pipeline(query)
-cache.record_miss(elapsed_ms=(time.time() - t0) * 1000)
-cache.set(query, result)
-return result
 ```
 
 ---
@@ -717,10 +715,10 @@ LongCache uses **BAAI/bge-small-en-v1.5** by default:
 
 ### FAISS Index
 
-| Index | Config Value | Characteristics |
-|-------|-------------|-----------------|
-| `IndexFlatIP` | `"flat"` | Exact search, deterministic, best for ≤ 100K entries |
-| `IndexHNSWFlat` | `"hnsw"` | Approximate search, sub-ms at any scale, best for 100K+ entries |
+| Index             | Config Value | Characteristics                                                 |
+| ----------------- | ------------ | --------------------------------------------------------------- |
+| `IndexFlatIP`   | `"flat"`   | Exact search, deterministic, best for ≤ 100K entries           |
+| `IndexHNSWFlat` | `"hnsw"`   | Approximate search, sub-ms at any scale, best for 100K+ entries |
 
 After TTL sweeps, namespace invalidations, or evictions, the local FAISS index is rebuilt from live backend entries. Redis storage alone does not synchronize indexes between processes.
 
@@ -737,7 +735,7 @@ A daemon thread checks for expired entries every 5 minutes when `ttl_seconds > 0
 
 ### Persistent Statistics
 
-Hit/miss statistics are persisted to the SQLite backend and survive process restarts. All stat mutations go through a reentrant lock to prevent race conditions under concurrent load.
+Stored entry hit counts persist; process-level hit/miss counters reset on restart. Rejected candidates and inspection do not count as hits. Unmeasured savings remain zero.
 
 ---
 
@@ -799,36 +797,36 @@ longcache/
 
 ### Core (Required)
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `sentence-transformers` | `>=2.3.0` | Local embedding — BGE-small |
-| `faiss-cpu` | `>=1.7.4` | Similarity search (Flat & HNSW) |
-| `numpy` | `>=1.24.0,<2.0.0` | Vector math |
-| `torch` | CPU (via uv) | sentence-transformers runtime |
-| `click` | `>=8.1.0` | CLI framework |
+| Package                   | Version             | Purpose                         |
+| ------------------------- | ------------------- | ------------------------------- |
+| `sentence-transformers` | `>=2.3.0`         | Local embedding — BGE-small    |
+| `faiss-cpu`             | `>=1.7.4`         | Similarity search (Flat & HNSW) |
+| `numpy`                 | `>=1.24.0,<2.0.0` | Vector math                     |
+| `torch`                 | CPU (via uv)        | sentence-transformers runtime   |
+| `click`                 | `>=8.1.0`         | CLI framework                   |
 
 > **Note**: `numpy<2.0.0` is required — numpy 2.0 breaks ABI compatibility with `faiss-cpu` and `torch`.
 
 ### Optional Extras
 
-| Extra | Package(s) | Purpose |
-|-------|-----------|---------|
-| `[redis]` | `redis>=5.0.0,<6.0.0` | Redis & async Redis backends |
-| `[langchain]` | `langchain-core>=1.0.0`, `langgraph>=1.0.0` | LangChain + LangGraph |
-| `[llamaindex]` | `llama-index-core>=0.10.0` | LlamaIndex integration |
-| `[openai]` | `openai>=1.0.0,<2.0.0` | Direct OpenAI integration |
-| `[server]` | `fastapi>=0.109.0`, `starlette>=0.36.0`, `uvicorn>=0.27.0` | ASGI middleware |
-| `[all]` | All of the above | Everything |
+| Extra            | Package(s)                                                       | Purpose                      |
+| ---------------- | ---------------------------------------------------------------- | ---------------------------- |
+| `[redis]`      | `redis>=5.0.0,<6.0.0`                                          | Redis & async Redis backends |
+| `[langchain]`  | `langchain-core>=1.0.0`, `langgraph>=1.0.0`                  | LangChain + LangGraph        |
+| `[llamaindex]` | `llama-index-core>=0.10.0`                                     | LlamaIndex integration       |
+| `[openai]`     | `openai>=1.0.0,<2.0.0`                                         | Direct OpenAI integration    |
+| `[server]`     | `fastapi>=0.109.0`, `starlette>=0.36.0`, `uvicorn>=0.27.0` | ASGI middleware              |
+| `[all]`        | All of the above                                                 | Everything                   |
 
 ### Development
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `pytest` | `>=8.0.0` | Test runner |
+| Package            | Version      | Purpose            |
+| ------------------ | ------------ | ------------------ |
+| `pytest`         | `>=8.0.0`  | Test runner        |
 | `pytest-asyncio` | `>=0.23.0` | Async test support |
-| `pytest-cov` | `>=5.0.0` | Coverage reporting |
-| `httpx` | `>=0.27.0` | ASGI test client |
-| `ruff` | `>=0.4.0` | Linter / formatter |
+| `pytest-cov`     | `>=5.0.0`  | Coverage reporting |
+| `httpx`          | `>=0.27.0` | ASGI test client   |
+| `ruff`           | `>=0.4.0`  | Linter / formatter |
 
 ---
 

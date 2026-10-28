@@ -1,188 +1,106 @@
-"""Tests for the LongCache CLI."""
+"""CLI maintenance requires explicit scope or local operator access."""
 
 import json
-import os
-import tempfile
-from unittest.mock import MagicMock, patch
-
+from dataclasses import replace
+from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
-
+from longcache import CacheConfig, LongCache, RequestScope, __version__
 from longcache.cli import main
+from tests.helpers import HashEmbedder, trusted_context
 
 
 @pytest.fixture
-def runner():
-    """Provide a Click CLI test runner."""
-    return CliRunner()
-
-
-@pytest.fixture
-def temp_db():
-    """Provide a temporary database file path."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield os.path.join(tmpdir, "test_cli_cache.db")
-
-
-class TestCLIStats:
-    """Tests for the 'stats' command."""
-
-    @patch("longcache.cli._get_cache")
-    def test_stats_command(self, mock_get_cache, runner):
-        """Test that stats command runs and displays output."""
-        mock_cache = MagicMock()
-        mock_cache.stats.return_value = {
-            "hits": 10,
-            "misses": 5,
-            "hit_rate": 0.6667,
-            "total_entries": 50,
-            "estimated_tokens_saved": 15000,
-            "estimated_cost_saved_usd": 0.45,
-        }
-        mock_get_cache.return_value = mock_cache
-
-        result = runner.invoke(main, ["stats"])
-        assert result.exit_code == 0
-        assert "LongCache Statistics" in result.output
-        assert "10" in result.output
-
-    @patch("longcache.cli._get_cache")
-    def test_stats_with_namespace(self, mock_get_cache, runner):
-        """Test stats command with --namespace option."""
-        mock_cache = MagicMock()
-        mock_cache.stats.return_value = {
-            "hits": 0,
-            "misses": 0,
-            "hit_rate": 0.0,
-            "total_entries": 0,
-            "estimated_tokens_saved": 0,
-            "estimated_cost_saved_usd": 0.0,
-        }
-        mock_get_cache.return_value = mock_cache
-
-        result = runner.invoke(main, ["stats", "--namespace", "faq"])
-        assert result.exit_code == 0
-
-
-class TestCLIClear:
-    """Tests for the 'clear' command."""
-
-    @patch("longcache.cli._get_cache")
-    def test_clear_namespace(self, mock_get_cache, runner):
-        """Test clearing a specific namespace."""
-        mock_cache = MagicMock()
-        mock_cache.invalidate.return_value = 5
-        mock_get_cache.return_value = mock_cache
-
-        result = runner.invoke(main, ["clear", "--namespace", "faq", "--yes"])
-        assert result.exit_code == 0
-        assert "5 entries deleted" in result.output
-
-    @patch("longcache.cli._get_cache")
-    def test_clear_all(self, mock_get_cache, runner):
-        """Test clearing all namespaces."""
-        mock_cache = MagicMock()
-        mock_cache.clear.return_value = 10
-        mock_get_cache.return_value = mock_cache
-
-        result = runner.invoke(main, ["clear", "--all", "--yes"])
-        assert result.exit_code == 0
-        assert "10 entries deleted" in result.output
-
-
-class TestCLIInspect:
-    """Tests for the 'inspect' command."""
-
-    @patch("longcache.cli._get_cache")
-    def test_inspect_found(self, mock_get_cache, runner):
-        """Test inspect when an entry is found."""
-        mock_cache = MagicMock()
-        mock_cache.inspect.return_value = {
-            "id": 1,
-            "query": "What is the refund policy?",
-            "namespace": "default",
-            "hit_count": 3,
-            "created_at": 1000000.0,
-            "expires_at": None,
-            "is_expired": False,
-        }
-        mock_get_cache.return_value = mock_cache
-
-        result = runner.invoke(main, ["inspect", "--query", "refund"])
-        assert result.exit_code == 0
-        assert "Nearest Cached Entry" in result.output
-        assert "refund" in result.output
-
-    @patch("longcache.cli._get_cache")
-    def test_inspect_not_found(self, mock_get_cache, runner):
-        """Test inspect when no entry is found."""
-        mock_cache = MagicMock()
-        mock_cache.inspect.return_value = None
-        mock_get_cache.return_value = mock_cache
-
-        result = runner.invoke(main, ["inspect", "--query", "nonexistent"])
-        assert result.exit_code == 0
-        assert "No similar entries found" in result.output
-
-
-class TestCLIExport:
-    """Tests for the 'export' command."""
-
-    @patch("longcache.cli._get_cache")
-    def test_export_to_stdout(self, mock_get_cache, runner):
-        """Test exporting entries to stdout."""
-        from longcache.backends.memory import InMemoryCacheBackend
-
-        mock_cache = MagicMock()
-        mock_backend = InMemoryCacheBackend()
-        mock_cache.backend = mock_backend
-
-        # Add an entry
-        import numpy as np
-        from longcache.core.entry import CacheEntry
-
-        vector = np.random.randn(384).astype(np.float32)
-        vector /= np.linalg.norm(vector)
-        entry = CacheEntry(
-            namespace="default",
-            query="test query",
-            vector=vector,
-            response="test response",
+def populated(tmp_path):
+    path = tmp_path / "cache.db"
+    alice = trusted_context()
+    bob = replace(alice, scope=RequestScope("test-tenant", "other-user"))
+    with LongCache(CacheConfig(db_path=str(path), ttl_seconds=0), embedder=HashEmbedder()) as cache:
+        cache.set("refund", "alice answer", context=alice)
+        cache.set("refund", "bob answer", context=bob)
+    context_file = tmp_path / "context.json"
+    context_file.write_text(
+        json.dumps(
+            {
+                "scope": {"tenant_id": "test-tenant", "user_id": "test-user"},
+                "operation": "test.answer",
+                "provider": "fixture",
+                "provider_scope": "fixture-v1",
+                "model": "fixture-model",
+                "prompt_version": "v1",
+            }
         )
-        mock_backend.store(entry)
+    )
+    return path, context_file
 
-        mock_get_cache.return_value = mock_cache
 
-        result = runner.invoke(main, ["export", "--format", "json"])
+def test_scoped_and_operator_export(populated):
+    path, ctx = populated
+    runner = CliRunner()
+    with patch(
+        "longcache.core.embedder.LocalEmbedder._load_model",
+        side_effect=AssertionError("Metadata command loaded model"),
+    ):
+        scoped = runner.invoke(main, ["export", "--db-path", str(path), "--context-file", str(ctx)])
+        assert scoped.exit_code == 0, scoped.output
+        assert [e["response"] for e in json.loads(scoped.output)] == ["alice answer"]
+        both = runner.invoke(main, ["export", "--db-path", str(path), "--operator"])
+        assert len(json.loads(both.output)) == 2
+        denied = runner.invoke(main, ["export", "--db-path", str(path)])
+        assert denied.exit_code != 0
+
+
+def test_scoped_clear_preserves_other_user(populated):
+    path, ctx = populated
+    runner = CliRunner()
+    denied = runner.invoke(main, ["clear", "--db-path", str(path), "--all", "--yes"])
+    assert denied.exit_code != 0
+    result = runner.invoke(
+        main, ["clear", "--db-path", str(path), "--context-file", str(ctx), "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "1 entries deleted" in result.output
+    exported = runner.invoke(main, ["export", "--db-path", str(path), "--operator"])
+    assert [e["response"] for e in json.loads(exported.output)] == ["bob answer"]
+    result = runner.invoke(main, ["clear", "--db-path", str(path), "--all", "--operator", "--yes"])
+    assert result.exit_code == 0
+
+
+def test_stats_and_missing_identity_do_not_load_model(populated):
+    path, ctx = populated
+    runner = CliRunner()
+    with patch(
+        "longcache.core.embedder.LocalEmbedder._load_model",
+        side_effect=AssertionError("Loaded model"),
+    ):
+        result = runner.invoke(main, ["stats", "--db-path", str(path), "--context-file", str(ctx)])
+        assert result.exit_code == 0, result.output
+        assert '"total_entries": 1' in result.output
+        result = runner.invoke(main, ["inspect", "--db-path", str(path), "--query", "refund"])
         assert result.exit_code == 0
-        # Output should be valid JSON
-        try:
-            data = json.loads(result.output)
-            assert isinstance(data, list)
-        except json.JSONDecodeError:
-            pytest.fail("Export output is not valid JSON")
-
-    @patch("longcache.cli._get_cache")
-    def test_export_to_file(self, mock_get_cache, runner, temp_dir):
-        """Test exporting entries to a file."""
-        from longcache.backends.memory import InMemoryCacheBackend
-
-        mock_cache = MagicMock()
-        mock_cache.backend = InMemoryCacheBackend()
-        mock_get_cache.return_value = mock_cache
-
-        output_path = os.path.join(temp_dir, "export.json")
-        result = runner.invoke(main, ["export", "--format", "json", "-o", output_path])
-
-        if result.exit_code == 0:
-            assert os.path.exists(output_path)
+        assert json.loads(result.output)["reason"] == "missing_identity"
 
 
-class TestCLIVersion:
-    """Tests for the --version flag."""
+def test_inspect_is_redacted_and_does_not_record_hit(populated):
+    path, ctx = populated
 
-    def test_version(self, runner):
-        """Test that --version displays the version."""
-        result = runner.invoke(main, ["--version"])
-        assert result.exit_code == 0
-        assert "0.1.1" in result.output
+    def make(config, metadata_only=False):
+        return LongCache(config, embedder=HashEmbedder(), metadata_only=metadata_only)
+
+    with patch("longcache.cli._get_cache", side_effect=make):
+        result = CliRunner().invoke(
+            main,
+            ["inspect", "--db-path", str(path), "--context-file", str(ctx), "--query", "refund"],
+        )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["outcome"] == "HIT"
+    assert "alice answer" not in result.output
+    with LongCache(CacheConfig(db_path=str(path)), metadata_only=True) as cache:
+        assert all(e.hit_count == 0 for e in cache.entries(operator=True))
+
+
+def test_cli_version():
+    result = CliRunner().invoke(main, ["--version"])
+    assert result.exit_code == 0
+    assert __version__ in result.output

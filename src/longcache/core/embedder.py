@@ -31,10 +31,10 @@ class LocalEmbedder(BaseEmbedder):
     """
 
     # Class-level cache for model instances (singleton per model name)
-    _instances: dict[str, LocalEmbedder] = {}
+    _instances: dict[tuple[str, str], LocalEmbedder] = {}
     _lock = threading.Lock()
 
-    def __new__(cls, model_name: str = "BAAI/bge-small-en-v1.5"):
+    def __new__(cls, model_name: str = "BAAI/bge-small-en-v1.5", revision: str = ""):
         """
         Singleton pattern: one embedder instance per model name.
 
@@ -47,16 +47,17 @@ class LocalEmbedder(BaseEmbedder):
             The singleton LocalEmbedder instance for the given model.
         """
         with cls._lock:
-            if model_name not in cls._instances:
+            key = (model_name, revision)
+            if key not in cls._instances:
                 instance = super().__new__(cls)
                 instance._model_name = model_name
                 instance._model = None
                 instance._dimension = None
                 instance._model_lock = threading.Lock()
-                cls._instances[model_name] = instance
-            return cls._instances[model_name]
+                cls._instances[key] = instance
+            return cls._instances[key]
 
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5", revision: str = ""):
         """
         Initialize the embedder. Model is loaded lazily on first embed() call.
 
@@ -67,6 +68,19 @@ class LocalEmbedder(BaseEmbedder):
         # __new__ handles actual initialization; __init__ just ensures
         # the model name is set (idempotent for singleton)
         self._model_name = model_name
+        self._revision = revision
+
+    @property
+    def descriptor(self):
+        from .embedding_contract import EmbeddingDescriptor
+
+        self._load_model()
+        revision = self._revision
+        if not revision:
+            revision = getattr(self._model[0].auto_model.config, "_commit_hash", None)
+        if not revision:
+            raise ValueError("Set embedder_revision to an immutable model revision")
+        return EmbeddingDescriptor(self._model_name, revision, self.dimension)
 
     def _load_model(self):
         """
@@ -91,8 +105,14 @@ class LocalEmbedder(BaseEmbedder):
                 )
 
             _log.info("Loading embedding model: %s", self._model_name)
-            self._model = SentenceTransformer(self._model_name)
-            self._dimension = self._model.get_embedding_dimension()
+            self._model = SentenceTransformer(
+                self._model_name, **({"revision": self._revision} if self._revision else {})
+            )
+            get_dimension = (
+                getattr(self._model, "get_embedding_dimension", None)
+                or self._model.get_sentence_embedding_dimension
+            )
+            self._dimension = get_dimension()
             _log.info("Embedding model loaded: dim=%d", self._dimension)
 
     @property
@@ -142,7 +162,7 @@ class LocalEmbedder(BaseEmbedder):
             Each row is L2-normalized.
         """
         if not texts:
-            return np.array([], dtype=np.float32)
+            return np.empty((0, self.dimension), dtype=np.float32)
 
         self._load_model()
         vectors = self._model.encode(texts, normalize_embeddings=True, batch_size=32)

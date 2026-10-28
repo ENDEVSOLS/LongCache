@@ -14,6 +14,13 @@ class BaseEmbedder(ABC):
     the FAISS index and must not change between calls.
     """
 
+    thread_safe = False
+
+    @property
+    def descriptor(self):
+        """Declare a stable model/revision contract for persisted vector compatibility."""
+        raise ValueError("Custom embedders must supply an EmbeddingDescriptor")
+
     @property
     @abstractmethod
     def dimension(self) -> int:
@@ -40,4 +47,6 @@ class BaseEmbedder(ABC):
         """
         import numpy as np
 
-        return np.stack([self.embed(t) for t in texts]).astype(np.float32)
+        if not texts:
+            return np.empty((0, self.dimension), dtype=np.float32)
+        return np.stack([self.embed(t) for t in texts])

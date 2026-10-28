@@ -1,226 +1,165 @@
-"""OpenAI chat-completion integration for supported single-turn text requests."""
+"""OpenAI adapter for the tested non-streaming single-turn text subset."""
 
 from __future__ import annotations
-
+from dataclasses import replace
 import inspect
-import json
-from typing import Any, Optional
-
-from longcache import CacheConfig, LongCache
+import math
+from longcache import CacheConfig, Instruction, LongCache, RequestContext
 
 
-def _request_context(kwargs: dict) -> Optional[tuple[str, str, str, float]]:
-    """Return a complete cache identity for the supported request subset."""
+def prepare_request(kwargs, base, codec):
+    if not isinstance(base, RequestContext):
+        return None, "missing_identity"
     if set(kwargs) - {"messages", "model", "temperature", "stream"}:
-        return None
+        return None, "unsupported_parameter"
     if kwargs.get("stream", False) is not False:
-        return None
-    model = kwargs.get("model")
-    messages = kwargs.get("messages")
-    if not isinstance(model, str) or not model or not isinstance(messages, list):
-        return None
-    if not messages or len(messages) > 3:
-        return None
+        return None, "unsupported_request_shape"
+    model, messages = kwargs.get("model"), kwargs.get("messages")
+    if (
+        type(model) is not str
+        or not model.strip()
+        or type(messages) is not list
+        or not 1 <= len(messages) <= 3
+    ):
+        return None, "unsupported_request_shape"
     instructions = []
     for message in messages[:-1]:
-        if not isinstance(message, dict) or set(message) != {"role", "content"}:
-            return None
-        if message["role"] not in {"system", "developer"}:
-            return None
-        if not isinstance(message["content"], str):
-            return None
-        instructions.append(message)
-    last = messages[-1]
-    if not isinstance(last, dict) or set(last) != {"role", "content"}:
-        return None
-    if last["role"] != "user" or not isinstance(last["content"], str) or not last["content"]:
-        return None
-    temperature = kwargs.get("temperature", -1.0)
-    if temperature is None:
-        temperature = -1.0
-    if not isinstance(temperature, (int, float)) or isinstance(temperature, bool):
-        return None
-    return last["content"], model, json.dumps(instructions, sort_keys=True), float(temperature)
-
-
-def _serializable_response(result: Any) -> Optional[dict]:
-    """Keep cached response types stable across persistent backends."""
-    if isinstance(result, dict):
-        choices = result.get("choices")
-        if not isinstance(choices, list) or not choices:
-            return None
-        for choice in choices:
-            if isinstance(choice, dict):
-                if choice.get("finish_reason") not in (None, "stop"):
-                    return None
-                message = choice.get("message", {})
-                if isinstance(message, dict) and (
-                    message.get("refusal") or message.get("tool_calls")
-                ):
-                    return None
-        payload = {"kind": "dict", "data": result}
-    elif type(result).__name__ == "ChatCompletion" and type(result).__module__.startswith("openai"):
-        if not result.choices or any(
-            choice.finish_reason != "stop" or choice.message.refusal or choice.message.tool_calls
-            for choice in result.choices
+        if (
+            type(message) is not dict
+            or set(message) != {"role", "content"}
+            or message["role"] not in ("system", "developer")
+            or type(message["content"]) is not str
         ):
-            return None
-        payload = {"kind": "ChatCompletion", "data": result.model_dump(mode="json")}
-    else:
-        return None
+            return None, "unsupported_request_shape"
+        instructions.append(Instruction(message["role"], message["content"]))
+    last = messages[-1]
+    if (
+        type(last) is not dict
+        or set(last) != {"role", "content"}
+        or last["role"] != "user"
+        or type(last["content"]) is not str
+        or not last["content"].strip()
+    ):
+        return None, "unsupported_request_shape"
     try:
-        json.dumps(payload, allow_nan=False)
-    except (TypeError, ValueError):
-        return None
-    return payload
-
-
-def _restore_response(cached: Any) -> Any:
-    if not isinstance(cached, dict) or "kind" not in cached:
-        return None
-    if cached["kind"] == "dict":
-        return cached.get("data")
-    if cached["kind"] == "ChatCompletion":
-        try:
-            from openai.types.chat import ChatCompletion
-
-            return ChatCompletion.model_validate(cached["data"])
-        except (ImportError, TypeError, ValueError):
-            return None
-    return None
+        model.encode("utf-8")
+        last["content"].encode("utf-8")
+        for instruction in instructions:
+            instruction.content.encode("utf-8")
+    except UnicodeError:
+        return None, "unsupported_request_shape"
+    generation = {}
+    if "temperature" in kwargs:
+        temp = kwargs["temperature"]
+        if temp is not None and (
+            type(temp) not in (int, float) or not math.isfinite(temp) or not 0 <= temp <= 2
+        ):
+            return None, "unsupported_parameter"
+        generation["temperature"] = temp
+    return (
+        last["content"],
+        replace(
+            base, model=model, instructions=tuple(instructions), generation=generation, codec=codec
+        ),
+    ), None
 
 
 class CachedOpenAI:
-    """Cache supported single-turn text calls on sync or async OpenAI clients."""
-
     def __init__(
         self,
-        client: Any,
-        cache: Optional[LongCache] = None,
-        config: Optional[CacheConfig] = None,
-        namespace: str = "openai",
+        client,
+        cache=None,
+        config=None,
+        namespace="openai",
+        *,
+        context=None,
+        response_codec=None,
     ):
         self._client = client
-        self.cache = cache or LongCache(config or CacheConfig(namespace=namespace))
-        # Do not reuse entries produced by the older, under-scoped wrapper.
-        self._namespace = f"{namespace}:single-turn-v1"
+        self.cache = cache if cache is not None else LongCache(config or CacheConfig())
+        self._namespace = namespace
+        self.context = context
+        self.codec = response_codec or (
+            "openai-sdk-v1" if type(client).__module__.startswith("openai") else "openai-dict-v1"
+        )
+        if self.codec not in ("openai-sdk-v1", "openai-dict-v1"):
+            raise ValueError("Unsupported OpenAI response codec")
         self.chat = _ChatProxy(self)
 
-    def _extract_query(self, messages: list[dict]) -> str:
-        """Compatibility helper; cache eligibility is checked separately."""
+    def _extract_query(self, messages):
+        """Legacy inspection helper; never used to decide cache eligibility."""
         for message in reversed(messages):
             if isinstance(message, dict) and message.get("role") == "user":
-                return message.get("content", str(message))
+                return message.get("content", "")
         return str(messages)
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name):
         return getattr(self._client, name)
-
-    def __repr__(self) -> str:
-        return f"CachedOpenAI(client={self._client!r}, cache={self.cache!r})"
 
 
 class _ChatProxy:
-    """Expose the documented `chat.completions.create` and legacy aliases."""
-
-    def __init__(self, parent: CachedOpenAI):
-        self._parent = parent
-        create = parent._client.chat.completions.create
-        wrapper = (
+    def __init__(self, parent):
+        cls = (
             AsyncCachedChatCompletions
-            if inspect.iscoroutinefunction(create)
+            if inspect.iscoroutinefunction(parent._client.chat.completions.create)
             else CachedChatCompletions
         )
-        self.completions = wrapper(parent)
+        self.completions = cls(parent)
+        self._parent = parent
 
-    def create(self, **kwargs) -> Any:
+    def create(self, **kwargs):
         return self.completions.create(**kwargs)
 
-    async def acreate(self, **kwargs) -> Any:
+    async def acreate(self, **kwargs):
         return await self.completions.acreate(**kwargs)
 
-    def __getattr__(self, name: str) -> Any:
+    def __getattr__(self, name):
         return getattr(self._parent._client.chat, name)
 
 
 class CachedChatCompletions:
-    """Cached wrapper for synchronous chat completions."""
-
-    def __init__(self, parent: CachedOpenAI):
+    def __init__(self, parent):
         self._parent = parent
 
-    def create(self, **kwargs) -> Any:
-        context = _request_context(kwargs)
-        client = self._parent._client.chat.completions
-        if context is None:
-            return client.create(**kwargs)
-        query, model, instructions, temperature = context
-        cached = self._parent.cache.get(
-            query,
-            namespace=self._parent._namespace,
-            model=model,
-            system_prompt=instructions,
-            temperature=temperature,
+    def create(self, *, cache_context=None, **kwargs):
+        parent = self._parent
+        prepared, _ = prepare_request(
+            kwargs, cache_context if cache_context is not None else parent.context, parent.codec
         )
-        if cached is not None:
-            restored = _restore_response(cached)
-            if restored is not None:
-                return restored
-        result = client.create(**kwargs)
-        payload = _serializable_response(result)
-        if payload is not None:
-            self._parent.cache.set(
-                query,
-                payload,
-                namespace=self._parent._namespace,
-                model=model,
-                system_prompt=instructions,
-                temperature=temperature,
-            )
+        if prepared is None:
+            return parent._client.chat.completions.create(**kwargs)
+        query, ctx = prepared
+        decision = parent.cache.lookup(query, parent._namespace, context=ctx)
+        if decision.outcome == "HIT":
+            return decision.response
+        result = parent._client.chat.completions.create(**kwargs)
+        parent.cache.set(query, result, parent._namespace, context=ctx)
         return result
 
-    async def acreate(self, **kwargs) -> Any:
-        context = _request_context(kwargs)
-        client = self._parent._client.chat.completions
-        call = getattr(client, "acreate", None)
-        if call is None or not inspect.iscoroutinefunction(call):
-            if inspect.iscoroutinefunction(client.create):
-                call = client.create
-            else:
-                raise TypeError("An async OpenAI client is required for acreate")
-        if context is None:
+    async def acreate(self, *, cache_context=None, **kwargs):
+        parent = self._parent
+        client = parent._client.chat.completions
+        call = (
+            client.create
+            if inspect.iscoroutinefunction(client.create)
+            else getattr(client, "acreate", None)
+        )
+        if not inspect.iscoroutinefunction(call):
+            raise TypeError("An async OpenAI client is required")
+        prepared, _ = prepare_request(
+            kwargs, cache_context if cache_context is not None else parent.context, parent.codec
+        )
+        if prepared is None:
             return await call(**kwargs)
-        query, model, instructions, temperature = context
-        cached = await self._parent.cache.aget(
-            query,
-            namespace=self._parent._namespace,
-            model=model,
-            system_prompt=instructions,
-            temperature=temperature,
-        )
-        if cached is not None:
-            restored = _restore_response(cached)
-            if restored is not None:
-                return restored
+        query, ctx = prepared
+        decision = await parent.cache.alookup(query, parent._namespace, context=ctx)
+        if decision.outcome == "HIT":
+            return decision.response
         result = await call(**kwargs)
-        payload = _serializable_response(result)
-        if payload is not None:
-            await self._parent.cache.aset(
-                query,
-                payload,
-                namespace=self._parent._namespace,
-                model=model,
-                system_prompt=instructions,
-                temperature=temperature,
-            )
+        await parent.cache.aset(query, result, parent._namespace, context=ctx)
         return result
-
-    def __repr__(self) -> str:
-        return f"CachedChatCompletions(parent={self._parent!r})"
 
 
 class AsyncCachedChatCompletions(CachedChatCompletions):
-    """Expose the SDK's awaited `create` call for AsyncOpenAI."""
-
-    async def create(self, **kwargs) -> Any:
+    async def create(self, **kwargs):
         return await self.acreate(**kwargs)

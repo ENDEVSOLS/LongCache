@@ -2,26 +2,17 @@
 
 from unittest.mock import MagicMock, AsyncMock, patch
 
-import numpy as np
 import pytest
 
 from longcache.config import CacheConfig
 
 
+from tests.helpers import HashEmbedder, trusted_context
+from tests.test_integrations_v2 import completion
+
+
 def _make_mock_embedder():
-    embedder = MagicMock()
-    embedder._model = MagicMock()
-    embedder._dimension = 384
-
-    def deterministic_embed(text: str):
-        np.random.seed(hash(text) % (2**31))
-        vector = np.random.randn(384).astype(np.float32)
-        vector /= np.linalg.norm(vector)
-        return vector
-
-    embedder.embed = deterministic_embed
-    embedder.dimension = 384
-    return embedder
+    return HashEmbedder()
 
 
 @patch("longcache.core.cache.LocalEmbedder")
@@ -35,13 +26,14 @@ class TestCachedOpenAI:
         client = CachedOpenAI(
             mock_openai_client,
             config=CacheConfig(backend="memory", similarity_threshold=0.9),
+            context=trusted_context(),
         )
         client.cache.embedder = mock_embedder
         return client
 
     def test_create_caches_result(self, MockEmbedder):
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = {"choices": ["fake completion"]}
+        mock_client.chat.completions.create.return_value = completion("fake completion")
 
         client = self._cached_client(MockEmbedder, mock_client)
 
@@ -51,7 +43,7 @@ class TestCachedOpenAI:
         # .create() proxies through to the underlying client's
         # chat.completions.create(), so the cached call site is client.chat.create().
         result1 = client.chat.create(model="gpt-4o", messages=messages)
-        assert result1 == {"choices": ["fake completion"]}
+        assert result1 == completion("fake completion")
         assert mock_client.chat.completions.create.call_count == 1
 
         result3 = client.chat.completions.create(model="gpt-4o", messages=messages)
@@ -64,7 +56,7 @@ class TestCachedOpenAI:
 
     def test_model_and_system_prompt_isolate_entries(self, MockEmbedder):
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = {"choices": ["result"]}
+        mock_client.chat.completions.create.return_value = completion("result")
         client = self._cached_client(MockEmbedder, mock_client)
         first = [{"role": "system", "content": "brief"}, {"role": "user", "content": "question"}]
         second = [{"role": "system", "content": "long"}, {"role": "user", "content": "question"}]
@@ -76,7 +68,7 @@ class TestCachedOpenAI:
 
     def test_multi_turn_and_unhandled_options_bypass_cache(self, MockEmbedder):
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = {"choices": ["result"]}
+        mock_client.chat.completions.create.return_value = completion("result")
         client = self._cached_client(MockEmbedder, mock_client)
         multi_turn = [
             {"role": "user", "content": "first"},
@@ -124,11 +116,15 @@ class TestCachedOpenAI:
         from longcache.integrations.openai import CachedOpenAI
 
         config = CacheConfig(backend="sqlite", db_path=str(tmp_path / "openai.db"), ttl_seconds=0)
-        client = CachedOpenAI(mock_client, config=config)
+        client = CachedOpenAI(
+            mock_client, config=config, context=trusted_context(), response_codec="openai-sdk-v1"
+        )
         messages = [{"role": "user", "content": "question"}]
         first = client.chat.completions.create(model="test-model", messages=messages)
         client.cache.close()
-        restarted = CachedOpenAI(mock_client, config=config)
+        restarted = CachedOpenAI(
+            mock_client, config=config, context=trusted_context(), response_codec="openai-sdk-v1"
+        )
         second = restarted.chat.completions.create(model="test-model", messages=messages)
         restarted.cache.close()
         assert isinstance(first, ChatCompletion)
@@ -160,23 +156,23 @@ class TestCachedOpenAI:
     async def test_acreate_caches_result(self, MockEmbedder):
         mock_client = MagicMock()
         mock_client.chat.completions.acreate = AsyncMock(
-            return_value={"choices": ["fake async completion"]}
+            return_value=completion("fake async completion")
         )
 
         client = self._cached_client(MockEmbedder, mock_client)
         messages = [{"role": "user", "content": "What is async RAG?"}]
 
         result1 = await client.chat.acreate(model="gpt-4o", messages=messages)
-        assert result1 == {"choices": ["fake async completion"]}
+        assert result1 == completion("fake async completion")
         assert mock_client.chat.completions.acreate.call_count == 1
 
         result2 = await client.chat.acreate(model="gpt-4o", messages=messages)
-        assert result2 == {"choices": ["fake async completion"]}
+        assert result2 == completion("fake async completion")
         assert mock_client.chat.completions.acreate.call_count == 1
 
     async def test_async_client_uses_awaited_create(self, MockEmbedder):
         mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value={"choices": ["async"]})
+        mock_client.chat.completions.create = AsyncMock(return_value=completion("async"))
         client = self._cached_client(MockEmbedder, mock_client)
         messages = [{"role": "user", "content": "question"}]
         first = await client.chat.completions.create(model="model", messages=messages)

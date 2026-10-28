@@ -6,9 +6,8 @@ requests through the middleware, rather than mocking the ASGI scope
 directly. This exercises the actual request/response interception path.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import numpy as np
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -18,20 +17,11 @@ from longcache.config import CacheConfig
 from longcache.middleware import LongCacheMiddleware
 
 
+from tests.helpers import HashEmbedder, trusted_context
+
+
 def _make_mock_embedder():
-    embedder = MagicMock()
-    embedder._model = MagicMock()
-    embedder._dimension = 384
-
-    def deterministic_embed(text: str):
-        np.random.seed(hash(text) % (2**31))
-        vector = np.random.randn(384).astype(np.float32)
-        vector /= np.linalg.norm(vector)
-        return vector
-
-    embedder.embed = deterministic_embed
-    embedder.dimension = 384
-    return embedder
+    return HashEmbedder()
 
 
 def _build_app(cache):
@@ -48,9 +38,23 @@ def _build_app(cache):
             if msg.get("role") == "user":
                 last_user = msg.get("content", "")
                 break
-        return JSONResponse({"choices": [{"message": {"content": f"answer to: {last_user}"}}]})
+        return JSONResponse(
+            {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": f"answer to: {last_user}"},
+                    }
+                ]
+            }
+        )
 
-    app.add_middleware(LongCacheMiddleware, cache=cache, cached_routes={"/v1/chat/completions"})
+    app.add_middleware(
+        LongCacheMiddleware,
+        cache=cache,
+        context=trusted_context(),
+        cached_routes={"/v1/chat/completions"},
+    )
     return app, call_count
 
 
@@ -81,7 +85,7 @@ class TestLongCacheMiddleware:
             # First request — MISS, should hit the upstream handler
             resp1 = await client.post("/v1/chat/completions", json=payload)
             assert resp1.status_code == 200
-            assert "x-longcache" not in resp1.headers
+            assert resp1.headers["x-longcache"] == "MISS"
             assert call_count["n"] == 1
             body1 = resp1.json()
             assert (
@@ -147,7 +151,7 @@ class TestLongCacheMiddleware:
             # but the middleware itself must not crash on unparsable JSON —
             # it should pass through to the app rather than caching garbage.
             assert resp.status_code in (422, 400)
-            assert "x-longcache" not in resp.headers
+            assert resp.headers["x-longcache"] == "BYPASS"
 
     async def test_missing_user_message_passes_through_without_caching(self, cache):
         app, call_count = _build_app(cache)

@@ -2,35 +2,19 @@
 
 import concurrent.futures
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import numpy as np
 import pytest
 
 from longcache.config import CacheConfig
 from longcache.core.cache import LongCache
 
 
+from tests.helpers import HashEmbedder, trusted_context
+
+
 def _make_mock_embedder():
-    """Create a mock embedder with deterministic vectors."""
-    embedder = MagicMock()
-    embedder._model = MagicMock()
-    embedder._dimension = 384
-
-    call_count = 0
-
-    def deterministic_embed(text: str) -> np.ndarray:
-        nonlocal call_count
-        # Similar text gets similar vectors
-        np.random.seed(hash(text) % (2**31))
-        vector = np.random.randn(384).astype(np.float32)
-        vector /= np.linalg.norm(vector)
-        call_count += 1
-        return vector
-
-    embedder.embed = deterministic_embed
-    embedder.dimension = 384
-    return embedder
+    return HashEmbedder()
 
 
 class TestLongCacheGetSet:
@@ -43,7 +27,7 @@ class TestLongCacheGetSet:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.9)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         # Set a value
@@ -61,7 +45,7 @@ class TestLongCacheGetSet:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.99)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         # Empty cache should miss
@@ -75,7 +59,7 @@ class TestLongCacheGetSet:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", namespace="ns_A", similarity_threshold=0.9)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set("query", "response_A", namespace="ns_A")
@@ -99,7 +83,7 @@ class TestLongCacheDecorator:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.9)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         call_count = 0
@@ -127,7 +111,7 @@ class TestLongCacheDecorator:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.9)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         @cache.cached(namespace="custom_ns")
@@ -148,7 +132,7 @@ class TestLongCacheTTL:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.9, ttl_seconds=1)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         # Set with very short TTL
@@ -172,7 +156,7 @@ class TestLongCacheTTL:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.9, ttl_seconds=0)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set("query", "response")
@@ -192,7 +176,7 @@ class TestLongCacheStats:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", track_stats=True)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         stats = cache.stats()
@@ -207,7 +191,7 @@ class TestLongCacheStats:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.9, track_stats=True)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set("query1", "response1")
@@ -233,7 +217,7 @@ class TestLongCacheInvalidate:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.9)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set("query", "response_A", namespace="ns_A")
@@ -254,13 +238,13 @@ class TestLongCacheInvalidate:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.9)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set("q1", "r1", namespace="ns_A")
         cache.set("q2", "r2", namespace="ns_B")
 
-        count = cache.clear()
+        count = cache.clear(operator=True)
         assert count >= 2
 
         stats = cache.stats()
@@ -277,7 +261,7 @@ class TestLongCacheInspect:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", similarity_threshold=0.9)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set("What is the refund policy?", "Our policy allows returns within 30 days.")
@@ -285,8 +269,9 @@ class TestLongCacheInspect:
         # Use the same query string to ensure a HIT with the mock embedder
         result = cache.inspect("What is the refund policy?")
         assert result is not None
-        assert "query" in result
-        assert "hit_count" in result
+        assert result["outcome"] == "HIT"
+        assert "query" not in result
+        assert "similarity" in result
 
     @patch("longcache.core.cache.LocalEmbedder")
     def test_inspect_empty_cache(self, MockEmbedder):
@@ -295,11 +280,11 @@ class TestLongCacheInspect:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory")
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         result = cache.inspect("anything")
-        assert result is None
+        assert result["outcome"] == "MISS"
 
 
 class TestLongCacheEviction:
@@ -316,7 +301,7 @@ class TestLongCacheEviction:
             similarity_threshold=0.9,
             max_entries=3,
         )
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         # Add 5 entries with distinct queries
@@ -338,17 +323,19 @@ class TestThreadSafetyAndIndexLeak:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory", track_stats=True)
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         num_threads = 8
         ops_per_thread = 50
         errors = []
 
+        cache.set("counted", "answer")
+
         def worker():
             for _ in range(ops_per_thread):
-                cache.record_hit()
-                cache.record_miss(elapsed_ms=5.0)
+                cache.get("counted")
+                cache.get("absent")
                 try:
                     s = cache.stats()
                     assert "hits" in s
@@ -364,7 +351,7 @@ class TestThreadSafetyAndIndexLeak:
         expected_total = num_threads * ops_per_thread
         assert stats["hits"] == expected_total
         assert stats["misses"] == expected_total
-        assert stats["total_saved_ms"] == expected_total * 5.0
+        assert stats["total_saved_ms"] == 0.0
 
     @patch("longcache.core.cache.LocalEmbedder")
     def test_rebuild_index_no_vector_duplication(self, MockEmbedder):
@@ -373,7 +360,7 @@ class TestThreadSafetyAndIndexLeak:
         MockEmbedder.return_value = mock_embedder
 
         config = CacheConfig(backend="memory")
-        cache = LongCache(config)
+        cache = LongCache(config, context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set("query_alpha", "response_alpha")
@@ -400,11 +387,11 @@ class TestCompositeCacheKeys:
         MockEmbedder.return_value = mock_embedder
 
         config_gpt = CacheConfig(backend="memory", model="gpt-4o")
-        cache_gpt = LongCache(config_gpt)
+        cache_gpt = LongCache(config_gpt, context=trusted_context())
         cache_gpt.embedder = mock_embedder
 
         config_flash = CacheConfig(backend="memory", model="gemini-1.5-flash")
-        cache_flash = LongCache(config_flash)
+        cache_flash = LongCache(config_flash, context=trusted_context())
         cache_flash.embedder = mock_embedder
 
         query = "Explain backpropagation"
@@ -418,7 +405,7 @@ class TestCompositeCacheKeys:
         mock_embedder = _make_mock_embedder()
         MockEmbedder.return_value = mock_embedder
 
-        cache = LongCache(CacheConfig(backend="memory"))
+        cache = LongCache(CacheConfig(backend="memory"), context=trusted_context())
         cache.embedder = mock_embedder
 
         query = "What is a stock?"
@@ -432,7 +419,7 @@ class TestCompositeCacheKeys:
         mock_embedder = _make_mock_embedder()
         MockEmbedder.return_value = mock_embedder
 
-        cache = LongCache(CacheConfig(backend="memory"))
+        cache = LongCache(CacheConfig(backend="memory"), context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set(
@@ -451,11 +438,10 @@ class TestCompositeCacheKeys:
             temperature=0.7,
         )
         assert entry is not None
-        assert entry["model"] == "gpt-4o"
-        assert entry["system_prompt"] == "Act as banker"
-        assert entry["temperature"] == 0.7
-        assert "finance" in entry["tags"]
-        assert "math" in entry["tags"]
+        assert entry["outcome"] == "HIT"
+        assert "system_prompt" not in entry
+        assert "query" not in entry
+        assert "similarity" in entry
 
 
 class TestTagBasedInvalidation:
@@ -466,7 +452,7 @@ class TestTagBasedInvalidation:
         mock_embedder = _make_mock_embedder()
         MockEmbedder.return_value = mock_embedder
 
-        cache = LongCache(CacheConfig(backend="memory"))
+        cache = LongCache(CacheConfig(backend="memory"), context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set("q1", "r1", tags=["policy", "v1"])
@@ -485,7 +471,7 @@ class TestTagBasedInvalidation:
         MockEmbedder.return_value = mock_embedder
 
         db_file = str(tmp_path / "tags_test.db")
-        cache = LongCache(CacheConfig(backend="sqlite", db_path=db_file))
+        cache = LongCache(CacheConfig(backend="sqlite", db_path=db_file), context=trusted_context())
         cache.embedder = mock_embedder
 
         cache.set("q_refund", "Refund details", tags=["doc:refund", "version:1"])
@@ -509,7 +495,7 @@ class TestStreamingSupport:
         mock_embedder = _make_mock_embedder()
         MockEmbedder.return_value = mock_embedder
 
-        cache = LongCache(CacheConfig(backend="memory"))
+        cache = LongCache(CacheConfig(backend="memory"), context=trusted_context())
         cache.embedder = mock_embedder
 
         call_count = 0
@@ -530,14 +516,14 @@ class TestStreamingSupport:
         # Second call: HIT, re-streams cached text
         stream2 = [token async for token in fake_llm_stream("greet me")]
         assert "".join(stream2) == "Hello world!"
-        assert call_count == 1  # Generator was NOT called again
+        assert call_count == 2  # Streaming is deliberately pass-through in v0.2
 
     @patch("longcache.core.cache.LocalEmbedder")
     def test_cached_stream_sync(self, MockEmbedder):
         mock_embedder = _make_mock_embedder()
         MockEmbedder.return_value = mock_embedder
 
-        cache = LongCache(CacheConfig(backend="memory"))
+        cache = LongCache(CacheConfig(backend="memory"), context=trusted_context())
         cache.embedder = mock_embedder
 
         call_count = 0
@@ -557,4 +543,4 @@ class TestStreamingSupport:
         # Second call: HIT
         out2 = list(fake_sync_stream("fox query"))
         assert "".join(out2) == "Quick brown fox"
-        assert call_count == 1
+        assert call_count == 2

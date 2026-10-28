@@ -1,0 +1,47 @@
+{
+  "protocol": "changing-document-rag-v1",
+  "embedding": {
+    "model": "BAAI/bge-small-en-v1.5",
+    "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+    "dimension": 384,
+    "preprocessing": "text-v1",
+    "normalization": "l2-float32-v1"
+  },
+  "scenarios": [
+    {
+      "backend": "memory",
+      "index": "flat",
+      "passed": true
+    },
+    {
+      "backend": "memory",
+      "index": "hnsw",
+      "passed": true
+    },
+    {
+      "backend": "sqlite",
+      "index": "flat",
+      "passed": true
+    },
+    {
+      "backend": "sqlite",
+      "index": "hnsw",
+      "passed": true
+    },
+    {
+      "backend": "redis",
+      "index": "flat",
+      "passed": true
+    },
+    {
+      "backend": "redis",
+      "index": "hnsw",
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "limitations": [
+    "Authored document fixtures with extractive generation; no external LLM was invoked.",
+    "Customer dataset review, answer quality and hosted CI are separate release gates."
+  ]
+}

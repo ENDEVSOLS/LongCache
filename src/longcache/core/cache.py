@@ -1,897 +1,566 @@
-"""
-LongCache — Main orchestrator class.
-
-Provides the primary API for semantic similarity caching:
-- get/set for manual cache control
-- @cached decorator for transparent caching
-- invalidate/clear for cache management
-- stats for monitoring hit rates and estimated savings
-"""
+"""Scoped semantic reuse with shared policy across sync and async entry points."""
 
 from __future__ import annotations
-
-import time
 import asyncio
+from collections import Counter
+from dataclasses import asdict, replace
+from functools import wraps
 import inspect
-import logging
-import hashlib
-import json
-import threading as _threading
-from typing import Any, Callable, Optional
+import threading
+import time
 
 from longcache.config import CacheConfig
-from longcache.core.embedder import LocalEmbedder
-from longcache.core.index import SimilarityIndex
-from longcache.core.entry import CacheEntry
-from longcache.backends.sqlite import SQLiteCacheBackend
 from longcache.backends.memory import InMemoryCacheBackend
-
-_log = logging.getLogger(__name__)
+from longcache.backends.sqlite import SQLiteCacheBackend
+from .base_embedder import BaseEmbedder
+from .decision import LookupDecision, StoreDecision
+from .embedding_contract import EmbeddingGuard, validate_vector
+from .embedder import LocalEmbedder
+from .entry import CacheEntry
+from .identity import Instruction, RequestContext, canonical, digest
+from .index import SimilarityIndex
+from .policy import admit, decode_response, verify
 
 
 class LongCache:
-    """
-    Semantic similarity cache for LLM/RAG pipelines.
-
-    Intercepts queries before they reach expensive LLM calls,
-    embeds the query locally, and checks
-    cosine similarity against a rolling FAISS/SQLite cache.
-
-    On HIT (similarity > threshold): returns cached response instantly.
-    On MISS: runs the full chain, caches the result, returns to user.
-
-    Usage:
-        # Simple decorator usage
-        cache = LongCache()
-
-        @cache.cached
-        def my_chain(query: str) -> str:
-            return expensive_llm_call(query)
-
-        # Manual get/set usage
-        cached = cache.get("What is the refund policy?")
-        if cached is None:
-            result = expensive_llm_call("What is the refund policy?")
-            cache.set("What is the refund policy?", result)
-    """
-
-    def __init__(self, config: Optional[CacheConfig] = None):
-        """
-        Initialize LongCache with optional configuration.
-
-        Args:
-            config: CacheConfig instance. Uses sensible defaults if not provided.
-        """
+    def __init__(
+        self,
+        config=None,
+        *,
+        embedder: BaseEmbedder | None = None,
+        admit=None,
+        verifier=None,
+        context: RequestContext | None = None,
+        metadata_only: bool = False,
+    ):
         self.config = config or CacheConfig()
-        if self.config.backend == "async_redis":
-            raise ValueError(
-                "async_redis is not supported through LongCache yet; "
-                "use redis or the standalone AsyncRedisCacheBackend"
-            )
-        self.embedder = LocalEmbedder(self.config.embedder_model)
+        for hook in (admit, verifier):
+            if hook is not None and (
+                not callable(hook)
+                or inspect.iscoroutinefunction(hook)
+                or inspect.iscoroutinefunction(getattr(hook, "__call__", None))
+            ):
+                raise ValueError("Policy hooks must be synchronous callables")
+        if context is not None and not isinstance(context, RequestContext):
+            raise ValueError("context must be a RequestContext")
+        self._metadata_only = metadata_only
+        self.context = context
+        self._admit, self._verifier = admit, verifier
+        self._mutation_lock = threading.RLock()
+        self._stats = Counter()
+        self._partition_stats = {}
+        self._closed = False
+        self._ready = False
+        self._stop_event = threading.Event()
+        self.embedder = (
+            embedder
+            if embedder is not None
+            else LocalEmbedder(self.config.embedder_model, self.config.embedder_revision)
+        )
+        self._embedding = EmbeddingGuard(self.embedder)
         self.backend = self._init_backend()
         self.index = SimilarityIndex(self.backend, self.config)
-        self._stats = {
-            "hits": 0,
-            "misses": 0,
-            "total_saved_ms": 0.0,
-        }
-        self._stats_lock = _threading.Lock()
-        self._mutation_lock = _threading.RLock()
-        self._closed = False
+        # Metadata-only construction does not load/download model weights.
+        try:
+            if self.backend.list_all_entries():
+                self._ensure_ready()
+        except Exception:
+            if hasattr(self.backend, "close"):
+                self.backend.close()
+            raise
+        self._sweep_thread = None
+        if not metadata_only and self.config.ttl_seconds and hasattr(self.backend, "sweep_expired"):
+            self._sweep_thread = threading.Thread(
+                target=self._sweep, daemon=True, name="longcache-sweeper"
+            )
+            self._sweep_thread.start()
 
-        # Load persisted stats from backend if available
-        if hasattr(self.backend, "load_stats"):
-            persisted = self.backend.load_stats()
-            with self._stats_lock:
-                self._stats.update(persisted)
+    def _init_backend(self):
+        c = self.config
+        if c.backend == "memory":
+            return InMemoryCacheBackend(c.max_entries)
+        if c.backend == "sqlite":
+            return SQLiteCacheBackend(c.db_path, c.max_entries)
+        if c.backend == "redis":
+            from longcache.backends.redis import RedisCacheBackend
 
-        # Rebuild FAISS index from existing backend entries
-        self._rebuild_index_from_backend()
+            return RedisCacheBackend(c.redis_url, c.max_entries, c.cache_id, c.generation)
+        raise ValueError("async_redis is not supported through LongCache; use a supported backend")
 
-        self._sweep_interval = 300  # seconds between TTL sweeps (5 minutes)
-        self._start_sweep_thread()
-
-    def __del__(self):
-        """Signal the sweeper thread to stop on garbage collection."""
-        if hasattr(self, "_stop_event"):
-            self._stop_event.set()
-
-    def close(self) -> None:
-        """Stop background work and close the current thread's backend connection."""
+    def _ensure_open(self):
         if self._closed:
+            raise RuntimeError("Cache is closed")
+
+    def _ensure_ready(self):
+        with self._mutation_lock:
+            self._ensure_open()
+            if self._metadata_only:
+                manifest = self.backend.read_manifest()
+                if manifest and (
+                    manifest.get("format") != 2
+                    or manifest.get("cache_id") != self.config.cache_id
+                    or manifest.get("generation") != self.config.generation
+                ):
+                    raise ValueError("Incompatible storage generation")
+                self._fingerprint = digest(manifest["embedding"]) if manifest else "empty-store"
+                self._ready = True
+                return
+            descriptor = self._embedding.descriptor
+            if self._ready:
+                return
+            self.backend.ensure_manifest(
+                {
+                    "format": 2,
+                    "cache_id": self.config.cache_id,
+                    "generation": self.config.generation,
+                    "embedding": asdict(descriptor),
+                }
+            )
+            if not self._ready:
+                self._fingerprint = descriptor.fingerprint
+                self._rebuild_index_from_backend()
+                self._ready = True
+
+    def _rebuild_index_from_backend(self):
+        if self._metadata_only:
             return
-        self._closed = True
-        if hasattr(self, "_stop_event"):
+        entries = []
+        for entry in self.backend.list_all_entries():
+            metadata = entry.metadata
+            if metadata.get("format") != 2 or metadata.get("embedding") != self._fingerprint:
+                continue
+            try:
+                validate_vector(entry.vector, self._embedding.descriptor.dimension)
+            except ValueError:
+                continue
+            entries.append(entry)
+        self.index.rebuild(entries)
+
+    def _prepare(self, query, context, namespace, legacy):
+        self._ensure_open()
+        if context is not None and any(value is not None for value in legacy.values()):
+            raise ValueError("Legacy context keywords cannot override RequestContext")
+        ctx = context if context is not None else self.context
+        if not isinstance(ctx, RequestContext):
+            return None, "missing_identity"
+        if any(value is not None for value in legacy.values()):
+            updates = {}
+            if legacy.get("model") is not None:
+                updates["model"] = legacy["model"]
+            if legacy.get("system_prompt") is not None:
+                updates["instructions"] = (Instruction("system", legacy["system_prompt"]),)
+            if legacy.get("temperature") is not None:
+                updates["generation"] = dict(ctx.generation) | {
+                    "temperature": legacy["temperature"]
+                }
+            ctx = replace(ctx, **updates)
+        policy = self.config.scope_policy
+        if policy != "public" and (
+            ctx.scope is None or (policy == "private" and not ctx.scope.user_id)
+        ):
+            return None, "missing_identity"
+        if (
+            type(query) is not str
+            or not query.strip()
+            or len(query) > self.config.max_query_chars
+            or ctx.request_shape != "single-turn-text"
+        ):
+            return None, "unsupported_request_shape"
+        try:
+            query.encode("utf-8")
+        except UnicodeError:
+            return None, "unsupported_request_shape"
+        if ctx.codec not in ("json-v1", "openai-dict-v1", "openai-sdk-v1"):
+            return None, "unsupported_request_shape"
+        if type(namespace or self.config.namespace) is not str:
+            raise ValueError("Namespace must be a string")
+        self._ensure_ready()
+        ns = namespace if namespace is not None else self.config.namespace
+        record = ctx.record(ns, policy, self._fingerprint, self.config.policy_version)
+        identity = canonical(record)
+        partition = "v2:" + digest(record)
+        return (ctx, partition, identity), None
+
+    def _account(self, partition, outcome):
+        if self.config.track_stats:
+            self._stats[outcome] += 1
+            self._partition_stats.setdefault(partition, Counter())[outcome] += 1
+
+    def lookup(
+        self,
+        query,
+        namespace=None,
+        *,
+        context=None,
+        model=None,
+        system_prompt=None,
+        temperature=None,
+        _inspect=False,
+        _cancel=None,
+    ):
+        if self._metadata_only:
+            raise ValueError("Vector operations require a normal cache instance")
+        prepared, reason = self._prepare(
+            query,
+            context,
+            namespace,
+            dict(model=model, system_prompt=system_prompt, temperature=temperature),
+        )
+        threshold = self.config.similarity_threshold
+        if reason:
+            return LookupDecision("BYPASS", reason, threshold=threshold)
+        ctx, partition, identity = prepared
+        vector = self._embedding.embed(query)
+        with self._mutation_lock:
+            candidates = self.index.candidates(
+                vector, partition, threshold, self.config.verification_budget + 1
+            )
+        reason, last_score = "no_candidate", None
+        for entry, score in candidates[: self.config.verification_budget]:
+            expected = {"format": 2, "identity": identity, "embedding": self._fingerprint}
+            if not isinstance(entry.metadata, dict) or any(
+                entry.metadata.get(k) != v for k, v in expected.items()
+            ):
+                reason = "legacy_format"
+                continue
+            try:
+                if entry.metadata.get("payload") != digest(entry.response):
+                    reason = "codec_invalid"
+                    continue
+                response = decode_response(entry.response, ctx.codec)
+                payload, admission = admit(response, ctx, self._admit)
+                if admission.action != "accept":
+                    reason = admission.reason
+                    continue
+            except (ValueError, TypeError, ImportError, AttributeError):
+                reason = "codec_invalid"
+                continue
+            last_score = score
+            verification = verify(query, entry.query, payload, score, ctx, self._verifier)
+            if verification.action != "accept":
+                reason = verification.reason
+                continue
+            with self._mutation_lock:
+                self._ensure_open()
+                current = self.backend.retrieve(entry.id)
+                if (
+                    current is None
+                    or current.namespace != partition
+                    or current.metadata != entry.metadata
+                    or current.is_expired()
+                ):
+                    reason = "expired_or_deleted"
+                    continue
+                # The backend may be mutable: validate the final payload, not a stale snapshot.
+                try:
+                    if digest(current.response) != entry.metadata["payload"]:
+                        reason = "codec_invalid"
+                        continue
+                except (TypeError, ValueError):
+                    reason = "codec_invalid"
+                    continue
+                if _cancel is not None and _cancel.is_set():
+                    return LookupDecision("BYPASS", "cancelled", threshold=threshold)
+                if not _inspect:
+                    self.backend.update_hit_count(entry.id)
+                    self._account(partition, "hits")
+                return LookupDecision("HIT", "accepted", response, score, entry.id, threshold)
+        if len(candidates) > self.config.verification_budget:
+            reason = "verification_budget_exhausted"
+        if not _inspect:
+            with self._mutation_lock:
+                if _cancel is None or not _cancel.is_set():
+                    self._account(partition, "misses")
+        return LookupDecision("MISS", reason, similarity=last_score, threshold=threshold)
+
+    async def _async(self, method, *args, **kwargs):
+        cancelled = threading.Event()
+        try:
+            return await asyncio.to_thread(method, *args, _cancel=cancelled, **kwargs)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    async def alookup(self, query, namespace=None, **kwargs):
+        return await self._async(self.lookup, query, namespace, **kwargs)
+
+    def get(
+        self,
+        query,
+        namespace=None,
+        model=None,
+        system_prompt=None,
+        temperature=None,
+        track_miss=True,
+        *,
+        context=None,
+    ):
+        return self.lookup(
+            query,
+            namespace,
+            context=context,
+            model=model,
+            system_prompt=system_prompt,
+            temperature=temperature,
+        ).response
+
+    async def aget(
+        self,
+        query,
+        namespace=None,
+        model=None,
+        system_prompt=None,
+        temperature=None,
+        track_miss=True,
+        *,
+        context=None,
+    ):
+        return (
+            await self.alookup(
+                query,
+                namespace,
+                context=context,
+                model=model,
+                system_prompt=system_prompt,
+                temperature=temperature,
+            )
+        ).response
+
+    def set(
+        self,
+        query,
+        response,
+        namespace=None,
+        ttl=None,
+        tags=None,
+        model=None,
+        system_prompt=None,
+        temperature=None,
+        *,
+        context=None,
+        _cancel=None,
+    ):
+        if self._metadata_only:
+            raise ValueError("Vector operations require a normal cache instance")
+        prepared, reason = self._prepare(
+            query,
+            context,
+            namespace,
+            dict(model=model, system_prompt=system_prompt, temperature=temperature),
+        )
+        if reason:
+            return StoreDecision("REJECTED", reason)
+        ctx, partition, identity = prepared
+        payload, decision = admit(response, ctx, self._admit)
+        if decision.action != "accept":
+            return StoreDecision("REJECTED", decision.reason)
+        effective_ttl = self.config.ttl_seconds if ttl is None else ttl
+        if type(effective_ttl) is not int or effective_ttl < 0:
+            raise ValueError("TTL must be a nonnegative integer")
+        if tags is not None and (
+            not isinstance(tags, (list, tuple)) or not all(type(t) is str for t in tags)
+        ):
+            raise ValueError("Tags must be strings")
+        vector = self._embedding.embed(query)
+        now = time.time()
+        entry = CacheEntry(
+            namespace=partition,
+            query=query,
+            response=payload,
+            vector=vector,
+            created_at=now,
+            expires_at=now + effective_ttl if effective_ttl else None,
+            tags=list(tags or []),
+            metadata={
+                "format": 2,
+                "identity": identity,
+                "embedding": self._fingerprint,
+                "payload": digest(payload),
+            },
+        )
+        with self._mutation_lock:
+            self._ensure_open()
+            if _cancel is not None and _cancel.is_set():
+                return StoreDecision("REJECTED", "cancelled")
+            identifier = self.backend.store(entry)
+            try:
+                self.index.add(vector, identifier)
+            except Exception:
+                self.backend.delete(identifier)
+                raise
+            excess = self.backend.count(partition) - self.config.max_entries
+            if excess > 0:
+                self.backend.evict_oldest(partition, excess)
+                self._rebuild_index_from_backend()
+        return StoreDecision("STORED", "accepted", identifier)
+
+    async def aset(self, query, response, namespace=None, **kwargs):
+        return await self._async(self.set, query, response, namespace, **kwargs)
+
+    def cached(
+        self,
+        func=None,
+        *,
+        namespace=None,
+        ttl=None,
+        tags=None,
+        context=None,
+        context_resolver=None,
+        **legacy,
+    ):
+        if context_resolver is not None and (
+            not callable(context_resolver)
+            or inspect.iscoroutinefunction(context_resolver)
+            or inspect.iscoroutinefunction(getattr(context_resolver, "__call__", None))
+        ):
+            raise ValueError("Context resolvers must be synchronous callables")
+
+        def decorate(fn):
+            def context_for(base):
+                if not isinstance(base, RequestContext):
+                    if inspect.iscoroutine(base):
+                        base.close()
+                    return None
+                return replace(
+                    base, operation=base.operation + ":" + fn.__module__ + "." + fn.__qualname__
+                )
+
+            def resolve(args, kwargs):
+                if context_resolver is None:
+                    return context_for(context or self.context)
+                try:
+                    return context_for(context_resolver(*args, **kwargs))
+                except Exception:
+                    return None
+
+            if inspect.iscoroutinefunction(fn):
+
+                @wraps(fn)
+                async def async_wrapper(query, *args, **kwargs):
+                    if args or kwargs or legacy:
+                        return await fn(query, *args, **kwargs)
+                    ctx = resolve((query,), {})
+                    if ctx is None:
+                        return await fn(query)
+                    decision = await self.alookup(query, namespace, context=ctx)
+                    if decision.outcome == "HIT":
+                        return decision.response
+                    result = await fn(query)
+                    await self.aset(query, result, namespace, context=ctx, ttl=ttl, tags=tags)
+                    return result
+
+                async_wrapper.cache_context_for = context_for
+                return async_wrapper
+
+            @wraps(fn)
+            def wrapper(query, *args, **kwargs):
+                if args or kwargs or legacy:
+                    return fn(query, *args, **kwargs)
+                ctx = resolve((query,), {})
+                if ctx is None:
+                    return fn(query)
+                decision = self.lookup(query, namespace, context=ctx)
+                if decision.outcome == "HIT":
+                    return decision.response
+                result = fn(query)
+                self.set(query, result, namespace, context=ctx, ttl=ttl, tags=tags)
+                return result
+
+            wrapper.cache_context_for = context_for
+            return wrapper
+
+        return decorate(func) if func is not None else decorate
+
+    def cached_stream(self, func=None, **kwargs):
+        # Preserve the generator interface while unsupported replay remains pass-through.
+        return func if func is not None else lambda fn: fn
+
+    def inspect(self, query, namespace=None, *, context=None, **legacy):
+        return self.lookup(query, namespace, context=context, _inspect=True, **legacy).inspection()
+
+    def invalidate(self, namespace=None, *, context=None, **legacy):
+        prepared, reason = self._prepare("maintenance", context, namespace, legacy)
+        if reason:
+            return 0
+        with self._mutation_lock:
+            count = self.backend.delete_namespace(prepared[1])
+            self._rebuild_index_from_backend()
+            return count
+
+    def invalidate_by_tag(self, tag, namespace=None, *, context=None, **legacy):
+        prepared, reason = self._prepare("maintenance", context, namespace, legacy)
+        if reason:
+            return 0
+        with self._mutation_lock:
+            count = self.backend.delete_by_tag(tag, prepared[1])
+            self._rebuild_index_from_backend()
+            return count
+
+    def clear(self, *, operator=False):
+        self._ensure_open()
+        if not operator:
+            raise ValueError("Clearing all partitions requires explicit operator=True")
+        with self._mutation_lock:
+            count = self.backend.clear()
+            self.index.rebuild([])
+            return count
+
+    def entries(self, namespace=None, *, context=None, operator=False):
+        self._ensure_open()
+        with self._mutation_lock:
+            if operator:
+                return self.backend.list_all_entries()
+            prepared, reason = self._prepare("maintenance", context, namespace, {})
+            return [] if reason else self.backend.list_entries(prepared[1])
+
+    def stats(self, *, context=None, namespace=None, operator=False):
+        self._ensure_open()
+        with self._mutation_lock:
+            if operator:
+                counts = self._stats.copy()
+                total = len(self.backend.list_all_entries())
+            else:
+                prepared, reason = self._prepare("maintenance", context, namespace, {})
+                counts = (
+                    Counter()
+                    if reason
+                    else self._partition_stats.get(prepared[1], Counter()).copy()
+                )
+                total = 0 if reason else self.backend.count(prepared[1])
+            hits, misses = counts["hits"], counts["misses"]
+            return {
+                "hits": hits,
+                "misses": misses,
+                "hit_rate": hits / (hits + misses) if hits + misses else 0.0,
+                "total_entries": total,
+                "total_saved_ms": 0.0,
+                "estimated_tokens_saved": 0,
+                "estimated_cost_saved_usd": 0.0,
+            }
+
+    def _sweep(self):
+        while not self._stop_event.wait(60):
+            with self._mutation_lock:
+                if not self._closed and self.backend.sweep_expired() and self._ready:
+                    self._rebuild_index_from_backend()
+
+    def close(self):
+        with self._mutation_lock:
+            if self._closed:
+                return
+            self._closed = True
             self._stop_event.set()
-            if _threading.current_thread() is not self._sweep_thread:
-                self._sweep_thread.join(timeout=5)
+        if self._sweep_thread is not None:
+            self._sweep_thread.join(timeout=2)
         if hasattr(self.backend, "close"):
             self.backend.close()
 
     def __enter__(self):
+        self._ensure_open()
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(self, *_):
         self.close()
 
-    def _start_sweep_thread(self) -> None:
-        """Start background thread that periodically deletes expired entries."""
-        if self.config.ttl_seconds == 0:
-            return  # No TTL configured, no need to sweep
-
-        def sweeper():
-            while not self._stop_event.is_set():
-                self._stop_event.wait(timeout=self._sweep_interval)
-                if self._stop_event.is_set():
-                    break
-                try:
-                    if hasattr(self.backend, "sweep_expired"):
-                        with self._mutation_lock:
-                            deleted = self.backend.sweep_expired()
-                            if deleted > 0:
-                                _log.debug("TTL sweep: deleted %d expired entries", deleted)
-                                self._rebuild_index_from_backend()
-                except Exception as e:
-                    _log.warning("TTL sweep error: %s", e)
-
-        self._stop_event = _threading.Event()
-        self._sweep_thread = _threading.Thread(
-            target=sweeper, name="longcache-sweeper", daemon=True
-        )
-        self._sweep_thread.start()
-
-    def _init_backend(self):
-        """
-        Initialize the cache storage backend based on configuration.
-
-        Returns:
-            An instance of the appropriate AbstractCacheBackend subclass.
-        """
-        if self.config.backend == "sqlite":
-            return SQLiteCacheBackend(
-                db_path=self.config.db_path,
-                max_entries=self.config.max_entries,
-            )
-        elif self.config.backend == "redis":
-            try:
-                from longcache.backends.redis import RedisCacheBackend
-            except ImportError:
-                raise ImportError(
-                    "Redis backend requires the 'redis' extra. "
-                    "Install with: uv pip install longcache[redis]"
-                )
-            return RedisCacheBackend(
-                redis_url=self.config.redis_url,
-                max_entries=self.config.max_entries,
-            )
-        elif self.config.backend == "memory":
-            return InMemoryCacheBackend(
-                max_entries=self.config.max_entries,
-            )
-        else:
-            raise ValueError(f"Unknown backend: {self.config.backend}")
-
-    def _rebuild_index_from_backend(self) -> None:
-        """
-        Rebuild the FAISS index from entries already stored in the backend.
-
-        Called on startup, after sweeping expired entries, or after evictions
-        so that cached entries are cleanly re-indexed without duplicate vector accumulation.
-        """
-        with self._mutation_lock:
-            entries = self.backend.list_all_entries()
-            self.index.rebuild(entries)
-
-    def _build_context_hash(
-        self,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> str:
-        """
-        Build a deterministic hash from model, system_prompt, and temperature.
-        Returns empty string if all context parameters are default/empty.
-        """
-        m = model if model is not None else self.config.model
-        sp = system_prompt if system_prompt is not None else self.config.system_prompt
-        t = temperature if temperature is not None else self.config.temperature
-
-        if not m and not sp and t < 0.0:
-            return ""
-
-        context: dict[str, Any] = {
-            "model": m,
-            "system_prompt": sp,
-        }
-        if t >= 0.0:
-            context["temperature"] = t
-
-        serialized = json.dumps(context, sort_keys=True)
-        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()[:12]
-
-    def _effective_namespace(
-        self,
-        namespace: Optional[str] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> str:
-        """
-        Returns the namespace scoped to tenant and execution context (model/prompt/temp).
-        """
-        base = namespace or self.config.namespace
-        ctx = self._build_context_hash(model, system_prompt, temperature)
-        if not ctx:
-            return base
-        return f"{base}:{ctx}"
-
-    def get(
-        self,
-        query: str,
-        namespace: Optional[str] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        track_miss: bool = True,
-    ) -> Optional[Any]:
-        """
-        Check the cache for a semantically similar query.
-
-        Embeds the query locally, searches the FAISS index, and returns
-        the cached response if a sufficiently similar entry exists.
-
-        Args:
-            query: The input query string.
-            namespace: Override the default namespace for this lookup.
-            model: Optional model identifier override.
-            system_prompt: Optional system prompt override.
-            temperature: Optional temperature override.
-            track_miss: Whether to record a miss if no match is found.
-
-        Returns:
-            The cached response if a HIT is found, None on MISS.
-        """
-        ns = self._effective_namespace(namespace, model, system_prompt, temperature)
-        vector = self.embedder.embed(query)
-
-        entry = self.index.find_similar(
-            vector,
-            threshold=self.config.similarity_threshold,
-            namespace=ns,
-        )
-
-        if entry is not None and not entry.is_expired():
-            if self.config.track_stats:
-                with self._stats_lock:
-                    self._stats["hits"] += 1
-                if hasattr(self.backend, "increment_hits"):
-                    self.backend.increment_hits()
-            _log.debug("Cache HIT  ns=%s query=%r", ns, query[:60])
-            return entry.response
-
-        if track_miss and self.config.track_stats:
-            with self._stats_lock:
-                self._stats["misses"] += 1
-            if hasattr(self.backend, "increment_misses"):
-                self.backend.increment_misses(0.0)
-
-        _log.debug("Cache MISS ns=%s query=%r", ns, query[:60])
-        return None
-
-    async def aget(
-        self,
-        query: str,
-        namespace: Optional[str] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-        track_miss: bool = True,
-    ) -> Optional[Any]:
-        """Async version of get(). Use in async contexts to avoid blocking."""
-        loop = asyncio.get_event_loop()
-        ns = self._effective_namespace(namespace, model, system_prompt, temperature)
-        vector = await loop.run_in_executor(None, self.embedder.embed, query)
-        entry = await loop.run_in_executor(
-            None,
-            lambda: self.index.find_similar(
-                vector, threshold=self.config.similarity_threshold, namespace=ns
-            ),
-        )
-        if entry is not None and not entry.is_expired():
-            if self.config.track_stats:
-                with self._stats_lock:
-                    self._stats["hits"] += 1
-                if hasattr(self.backend, "increment_hits"):
-                    if inspect.iscoroutinefunction(getattr(self.backend, "increment_hits")):
-                        await self.backend.increment_hits()
-                    else:
-                        await loop.run_in_executor(None, self.backend.increment_hits)
-            _log.debug("Cache HIT  ns=%s query=%r", ns, query[:60])
-            return entry.response
-
-        if track_miss and self.config.track_stats:
-            with self._stats_lock:
-                self._stats["misses"] += 1
-            if hasattr(self.backend, "increment_misses"):
-                if inspect.iscoroutinefunction(getattr(self.backend, "increment_misses")):
-                    await self.backend.increment_misses(0.0)
-                else:
-                    await loop.run_in_executor(None, self.backend.increment_misses, 0.0)
-
-        _log.debug("Cache MISS ns=%s query=%r", ns, query[:60])
-        return None
-
-    def set(
-        self,
-        query: str,
-        response: Any,
-        namespace: Optional[str] = None,
-        ttl: Optional[int] = None,
-        tags: Optional[list[str]] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> None:
-        """
-        Store a query-response pair in the cache.
-
-        Embeds the query locally, creates a CacheEntry, stores it in
-        the backend, and adds the vector to the FAISS index.
-
-        Args:
-            query: The query string to cache.
-            response: The LLM response to cache. Must be serializable by the backend.
-            namespace: Override the default namespace for this entry.
-            ttl: Override the default TTL (in seconds) for this entry.
-            tags: Optional list of tags to associate with this entry.
-            model: Optional model identifier override.
-            system_prompt: Optional system prompt override.
-            temperature: Optional temperature override.
-        """
-        ns = self._effective_namespace(namespace, model, system_prompt, temperature)
-        effective_ttl = ttl if ttl is not None else self.config.ttl_seconds
-
-        vector = self.embedder.embed(query)
-
-        now = time.time()
-        expires_at = (now + effective_ttl) if effective_ttl > 0 else None
-
-        entry = CacheEntry(
-            namespace=ns,
-            query=query,
-            vector=vector,
-            response=response,
-            created_at=now,
-            expires_at=expires_at,
-            hit_count=0,
-            model=model if model is not None else self.config.model,
-            system_prompt=system_prompt if system_prompt is not None else self.config.system_prompt,
-            temperature=temperature if temperature is not None else self.config.temperature,
-            tags=list(tags or []),
-        )
-
-        # Store in backend (assigns entry.id)
-        with self._mutation_lock:
-            entry_id = self.backend.store(entry)
-            entry.id = entry_id
-            self.index.add(vector, entry_id)
-            self._evict_if_needed(ns)
-
-        _log.debug("Cache SET  ns=%s ttl=%s query=%r", ns, effective_ttl, query[:60])
-
-    async def aset(
-        self,
-        query: str,
-        response: Any,
-        namespace: Optional[str] = None,
-        ttl: Optional[int] = None,
-        tags: Optional[list[str]] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> None:
-        """Async version of set(). Use in async contexts to avoid blocking."""
-        loop = asyncio.get_event_loop()
-        ns = self._effective_namespace(namespace, model, system_prompt, temperature)
-        effective_ttl = ttl if ttl is not None else self.config.ttl_seconds
-        vector = await loop.run_in_executor(None, self.embedder.embed, query)
-        now = time.time()
-        expires_at = (now + effective_ttl) if effective_ttl > 0 else None
-        entry = CacheEntry(
-            namespace=ns,
-            query=query,
-            vector=vector,
-            response=response,
-            created_at=now,
-            expires_at=expires_at,
-            hit_count=0,
-            model=model if model is not None else self.config.model,
-            system_prompt=system_prompt if system_prompt is not None else self.config.system_prompt,
-            temperature=temperature if temperature is not None else self.config.temperature,
-            tags=list(tags or []),
-        )
-
-        def store_and_index():
-            with self._mutation_lock:
-                entry_id = self.backend.store(entry)
-                entry.id = entry_id
-                self.index.add(vector, entry_id)
-                self._evict_if_needed(ns)
-
-        await loop.run_in_executor(None, store_and_index)
-
-        _log.debug("Cache ASET ns=%s ttl=%s query=%r", ns, effective_ttl, query[:60])
-
-    def cached(
-        self,
-        func: Optional[Callable] = None,
-        *,
-        namespace: Optional[str] = None,
-        ttl: Optional[int] = None,
-        tags: Optional[list[str]] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> Callable:
-        """
-        Decorator for caching any function that takes a query string as first argument.
-
-        Can be used with or without arguments:
-            @cache.cached
-            def my_chain(query): ...
-
-            @cache.cached(namespace="faq", ttl=7200, model="gpt-4o", tags=["billing"])
-            def my_chain(query): ...
-        """
-
-        def decorator(fn: Callable) -> Callable:
-            if inspect.iscoroutinefunction(fn):
-
-                async def async_wrapper(query: str, *args, **kwargs):
-                    if args or kwargs:
-                        return await fn(query, *args, **kwargs)
-                    cached_result = await self.aget(
-                        query,
-                        namespace=namespace,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        track_miss=False,
-                    )
-                    if cached_result is not None:
-                        return cached_result
-
-                    t0 = time.time()
-                    result = await fn(query, *args, **kwargs)
-                    elapsed_ms = (time.time() - t0) * 1000
-
-                    await self.aset(
-                        query,
-                        result,
-                        namespace=namespace,
-                        ttl=ttl,
-                        tags=tags,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                    )
-
-                    if self.config.track_stats:
-                        with self._stats_lock:
-                            self._stats["misses"] += 1
-                            self._stats["total_saved_ms"] += elapsed_ms
-                        if hasattr(self.backend, "increment_misses"):
-                            if inspect.iscoroutinefunction(
-                                getattr(self.backend, "increment_misses")
-                            ):
-                                await self.backend.increment_misses(elapsed_ms)
-                            else:
-                                self.backend.increment_misses(elapsed_ms)
-                    return result
-
-                async_wrapper.__name__ = fn.__name__
-                async_wrapper.__doc__ = fn.__doc__
-                async_wrapper.__wrapped__ = fn
-                return async_wrapper
-            else:
-
-                def wrapper(query: str, *args, **kwargs):
-                    if args or kwargs:
-                        return fn(query, *args, **kwargs)
-                    cached_result = self.get(
-                        query,
-                        namespace=namespace,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        track_miss=False,
-                    )
-                    if cached_result is not None:
-                        return cached_result
-
-                    t0 = time.time()
-                    result = fn(query, *args, **kwargs)
-                    elapsed_ms = (time.time() - t0) * 1000
-
-                    self.set(
-                        query,
-                        result,
-                        namespace=namespace,
-                        ttl=ttl,
-                        tags=tags,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                    )
-
-                    if self.config.track_stats:
-                        with self._stats_lock:
-                            self._stats["misses"] += 1
-                            self._stats["total_saved_ms"] += elapsed_ms
-                        if hasattr(self.backend, "increment_misses"):
-                            self.backend.increment_misses(elapsed_ms)
-
-                    return result
-
-                wrapper.__name__ = fn.__name__
-                wrapper.__doc__ = fn.__doc__
-                wrapper.__wrapped__ = fn
-                return wrapper
-
-        if func is not None:
-            return decorator(func)
-        return decorator
-
-    def cached_stream(
-        self,
-        func: Optional[Callable] = None,
-        *,
-        namespace: Optional[str] = None,
-        ttl: Optional[int] = None,
-        tags: Optional[list[str]] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> Callable:
-        """
-        Decorator for caching async or sync streaming generator functions.
-
-        On MISS: yields stream chunks live while collecting full text, then saves in cache.
-        On HIT:  re-yields cached text in chunks to emulate the streaming interface.
-        """
-
-        def decorator(fn: Callable) -> Callable:
-            if inspect.isasyncgenfunction(fn):
-
-                async def async_stream_wrapper(query: str, *args, **kwargs):
-                    if args or kwargs:
-                        async for token in fn(query, *args, **kwargs):
-                            yield token
-                        return
-                    cached_result = await self.aget(
-                        query,
-                        namespace=namespace,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        track_miss=False,
-                    )
-                    if cached_result is not None:
-                        if isinstance(cached_result, str):
-                            chunk_size = max(1, len(cached_result) // 20 or 1)
-                            for i in range(0, len(cached_result), chunk_size):
-                                yield cached_result[i : i + chunk_size]
-                        else:
-                            yield cached_result
-                        return
-
-                    t0 = time.time()
-                    collected_tokens = []
-                    async for token in fn(query, *args, **kwargs):
-                        collected_tokens.append(token)
-                        yield token
-
-                    elapsed_ms = (time.time() - t0) * 1000
-                    full_response = (
-                        "".join(collected_tokens)
-                        if all(isinstance(c, str) for c in collected_tokens)
-                        else collected_tokens
-                    )
-                    await self.aset(
-                        query,
-                        full_response,
-                        namespace=namespace,
-                        ttl=ttl,
-                        tags=tags,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                    )
-
-                    if self.config.track_stats:
-                        with self._stats_lock:
-                            self._stats["misses"] += 1
-                            self._stats["total_saved_ms"] += elapsed_ms
-                        if hasattr(self.backend, "increment_misses"):
-                            if inspect.iscoroutinefunction(
-                                getattr(self.backend, "increment_misses")
-                            ):
-                                await self.backend.increment_misses(elapsed_ms)
-                            else:
-                                self.backend.increment_misses(elapsed_ms)
-
-                async_stream_wrapper.__name__ = fn.__name__
-                async_stream_wrapper.__doc__ = fn.__doc__
-                async_stream_wrapper.__wrapped__ = fn
-                return async_stream_wrapper
-            else:
-
-                def sync_stream_wrapper(query: str, *args, **kwargs):
-                    if args or kwargs:
-                        yield from fn(query, *args, **kwargs)
-                        return
-                    cached_result = self.get(
-                        query,
-                        namespace=namespace,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                        track_miss=False,
-                    )
-                    if cached_result is not None:
-                        if isinstance(cached_result, str):
-                            chunk_size = max(1, len(cached_result) // 20 or 1)
-                            for i in range(0, len(cached_result), chunk_size):
-                                yield cached_result[i : i + chunk_size]
-                        else:
-                            yield cached_result
-                        return
-
-                    t0 = time.time()
-                    collected_tokens = []
-                    for token in fn(query, *args, **kwargs):
-                        collected_tokens.append(token)
-                        yield token
-
-                    elapsed_ms = (time.time() - t0) * 1000
-                    full_response = (
-                        "".join(collected_tokens)
-                        if all(isinstance(c, str) for c in collected_tokens)
-                        else collected_tokens
-                    )
-                    self.set(
-                        query,
-                        full_response,
-                        namespace=namespace,
-                        ttl=ttl,
-                        tags=tags,
-                        model=model,
-                        system_prompt=system_prompt,
-                        temperature=temperature,
-                    )
-
-                    if self.config.track_stats:
-                        with self._stats_lock:
-                            self._stats["misses"] += 1
-                            self._stats["total_saved_ms"] += elapsed_ms
-                        if hasattr(self.backend, "increment_misses"):
-                            self.backend.increment_misses(elapsed_ms)
-
-                sync_stream_wrapper.__name__ = fn.__name__
-                sync_stream_wrapper.__doc__ = fn.__doc__
-                sync_stream_wrapper.__wrapped__ = fn
-                return sync_stream_wrapper
-
-        if func is not None:
-            return decorator(func)
-        return decorator
-
-    def invalidate(
-        self,
-        namespace: Optional[str] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> int:
-        """
-        Invalidate all entries in a namespace (optionally scoped to model/prompt/temperature).
-
-        Removes all cache entries and their vectors from both the
-        backend storage and the FAISS index.
-
-        Args:
-            namespace: The namespace to clear. Defaults to the configured namespace.
-            model: Optional model scope.
-            system_prompt: Optional system prompt scope.
-            temperature: Optional temperature scope.
-
-        Returns:
-            The number of entries deleted.
-        """
-        ns = self._effective_namespace(namespace, model, system_prompt, temperature)
-        with self._mutation_lock:
-            count = self.backend.delete_namespace(ns)
-            self._rebuild_index_from_backend()
-
-        return count
-
-    def invalidate_by_tag(
-        self,
-        tag: str,
-        namespace: Optional[str] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> int:
-        """
-        Invalidate all cache entries carrying the given tag.
-
-        Args:
-            tag: The tag label to match.
-            namespace: Scope the invalidation. Defaults to config namespace.
-            model: Optional model context.
-            system_prompt: Optional system prompt context.
-            temperature: Optional temperature context.
-
-        Returns:
-            The number of entries deleted.
-        """
-        ns = self._effective_namespace(namespace, model, system_prompt, temperature)
-        with self._mutation_lock:
-            count = self.backend.delete_by_tag(tag, ns)
-            if count > 0:
-                self._rebuild_index_from_backend()
-        return count
-
-    def clear(self) -> int:
-        """
-        Clear the entire cache across all namespaces.
-
-        Removes all entries from backend storage and resets the FAISS index.
-
-        Returns:
-            The total number of entries deleted.
-        """
-        with self._mutation_lock:
-            count = self.backend.clear()
-            self.index.rebuild([])
-
-        # Reset stats
-        if self.config.track_stats:
-            with self._stats_lock:
-                self._stats = {"hits": 0, "misses": 0, "total_saved_ms": 0.0}
-
-        return count
-
-    def record_hit(self) -> None:
-        """Record a cache hit in a thread-safe manner."""
-        if self.config.track_stats:
-            with self._stats_lock:
-                self._stats["hits"] += 1
-            if hasattr(self.backend, "increment_hits"):
-                self.backend.increment_hits()
-
-    def record_miss(self, elapsed_ms: float = 0.0) -> None:
-        """Record a cache miss and elapsed generation time in a thread-safe manner."""
-        if self.config.track_stats:
-            with self._stats_lock:
-                self._stats["misses"] += 1
-                self._stats["total_saved_ms"] += elapsed_ms
-            if hasattr(self.backend, "increment_misses"):
-                self.backend.increment_misses(elapsed_ms)
-
-    def stats(self) -> dict:
-        """
-        Get cache statistics including hit rate and estimated savings.
-
-        Returns:
-            Dictionary with:
-                - hits: Number of cache hits
-                - misses: Number of cache misses
-                - hit_rate: Hit rate as a float between 0 and 1
-                - total_saved_ms: Total milliseconds saved across all misses/hits
-                - estimated_tokens_saved: Rough estimate of tokens saved by caching
-                - estimated_cost_saved_usd: Estimated USD saved (at GPT-4 pricing)
-                - total_entries: Total number of entries in the cache
-        """
-        with self._stats_lock:
-            hits = self._stats.get("hits", 0)
-            misses = self._stats.get("misses", 0)
-            total_saved_ms = self._stats.get("total_saved_ms", 0.0)
-
-        total = hits + misses
-        avg_tokens_per_hit = 1500  # rough estimate for typical RAG responses
-        gpt4_cost_per_1k_tokens = 0.03  # approximate blended rate
-
-        estimated_tokens_saved = hits * avg_tokens_per_hit
-        estimated_cost_saved = (estimated_tokens_saved / 1000) * gpt4_cost_per_1k_tokens
-
-        return {
-            "hits": hits,
-            "misses": misses,
-            "hit_rate": hits / total if total > 0 else 0.0,
-            "total_saved_ms": total_saved_ms,
-            "estimated_tokens_saved": estimated_tokens_saved,
-            "estimated_cost_saved_usd": round(estimated_cost_saved, 4),
-            "total_entries": self.backend.count(self.config.namespace),
-        }
-
-    def inspect(
-        self,
-        query: str,
-        namespace: Optional[str] = None,
-        model: Optional[str] = None,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> Optional[dict]:
-        """
-        Inspect the nearest cached entry for a query without returning the cached response.
-
-        Useful for debugging and understanding what would be cached for a given query.
-
-        Args:
-            query: The query to inspect.
-            namespace: Override namespace for the lookup.
-            model: Optional model context.
-            system_prompt: Optional system prompt context.
-            temperature: Optional temperature context.
-
-        Returns:
-            Dictionary with entry metadata and similarity info, or None if no match.
-        """
-        ns = self._effective_namespace(namespace, model, system_prompt, temperature)
-        vector = self.embedder.embed(query)
-
-        entry = self.index.find_similar(
-            vector,
-            threshold=0.0,  # Find the nearest regardless of threshold
-            namespace=ns,
-            record_hit=False,
-        )
-
-        if entry is None:
-            return None
-
-        return {
-            "id": entry.id,
-            "query": entry.query,
-            "namespace": entry.namespace,
-            "hit_count": entry.hit_count,
-            "created_at": entry.created_at,
-            "expires_at": entry.expires_at,
-            "is_expired": entry.is_expired(),
-            "model": entry.model,
-            "system_prompt": entry.system_prompt,
-            "temperature": entry.temperature,
-            "tags": list(entry.tags or []),
-        }
-
-    def _evict_if_needed(self, namespace: str) -> None:
-        """
-        Evict oldest entries if the namespace exceeds max_entries.
-
-        Uses LRU-style eviction: entries with the oldest created_at
-        timestamps are removed first.
-
-        Args:
-            namespace: The namespace to check for eviction.
-        """
-        count = self.backend.count(namespace)
-        if count <= self.config.max_entries:
-            return
-
-        # Evict the excess entries (oldest first)
-        excess = count - self.config.max_entries
-        evicted = self.backend.evict_oldest(namespace, excess)
-
-        # Rebuild index to keep it consistent
-        if evicted > 0:
-            self._rebuild_index_from_backend()
-
-    def __repr__(self) -> str:
-        return (
-            f"LongCache(backend={self.config.backend}, "
-            f"namespace={self.config.namespace!r}, "
-            f"threshold={self.config.similarity_threshold})"
-        )
+    def __repr__(self):
+        return f"LongCache(backend={self.config.backend!r}, format=2)"

@@ -10,7 +10,6 @@ is skipped.
 
 import os
 import time
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -189,21 +188,17 @@ class TestRedisBackend:
     def test_longcache_restart_restores_every_namespace(self, backend):
         from longcache import CacheConfig, LongCache
 
-        class Embedder:
-            def embed(self, query):
-                value = np.ones(384, dtype=np.float32)
-                return value / np.linalg.norm(value)
+        from tests.helpers import HashEmbedder, trusted_context
 
         config = CacheConfig(backend="redis", redis_url=REDIS_URL, ttl_seconds=0)
-        with patch("longcache.core.cache.LocalEmbedder", return_value=Embedder()):
-            first = LongCache(config)
-            first.set("same", "A", namespace="A")
-            first.set("same", "B", namespace="B")
-            first.close()
-            restarted = LongCache(config)
-            assert restarted.get("same", namespace="A") == "A"
-            assert restarted.get("same", namespace="B") == "B"
-            restarted.close()
+        first = LongCache(config, embedder=HashEmbedder(), context=trusted_context())
+        first.set("same", "A", namespace="A")
+        first.set("same", "B", namespace="B")
+        first.close()
+        restarted = LongCache(config, embedder=HashEmbedder(), context=trusted_context())
+        assert restarted.get("same", namespace="A") == "A"
+        assert restarted.get("same", namespace="B") == "B"
+        restarted.close()
 
 
 # ---------- Async Redis Backend ----------
@@ -303,3 +298,40 @@ class TestAsyncRedisBackend:
         assert result.namespace == "cross"
 
         await async_backend.delete_namespace("cross")
+
+
+def test_v2_clear_preserves_legacy_keyspace():
+    backend = RedisCacheBackend(redis_url=REDIS_URL, cache_id="migration-check")
+    legacy = "longcache:entry:v011-migration-fixture"
+    backend._client.set(legacy, "preserved legacy data")
+    try:
+        backend.store(make_entry(namespace="owned"))
+        backend.clear()
+        assert backend._client.get(legacy) == "preserved legacy data"
+    finally:
+        backend._client.delete(legacy)
+        backend.close()
+
+
+@pytest.mark.asyncio
+async def test_async_cache_over_sync_redis_obeys_scope_and_manifest():
+    from longcache import CacheConfig, LongCache, RequestScope, EmbeddingDescriptor
+    from tests.helpers import HashEmbedder, trusted_context
+
+    config = CacheConfig(
+        backend="redis", redis_url=REDIS_URL, cache_id="v02-async-contract", ttl_seconds=0
+    )
+    with LongCache(config, embedder=HashEmbedder()) as cache:
+        cache.clear(operator=True)
+        stored = await cache.aset("refund", "answer", context=trusted_context())
+        assert stored.outcome == "STORED"
+        assert await cache.aget("refund", context=trusted_context()) == "answer"
+        other = trusted_context(scope=RequestScope("test-tenant", "other"))
+        assert (await cache.alookup("refund", context=other)).outcome == "MISS"
+    different = HashEmbedder()
+    different.descriptor = EmbeddingDescriptor("test-hash", "different-revision", 384)
+    with pytest.raises(ValueError, match="Incompatible"):
+        LongCache(config, embedder=different)
+    backend = RedisCacheBackend(redis_url=REDIS_URL, cache_id="v02-async-contract")
+    backend.clear()
+    backend.close()

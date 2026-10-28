@@ -1,59 +1,20 @@
 # Installation
 
-LongCache requires **Python 3.10** or newer.
+LongCache v0.2 requires Python 3.11 or newer; Python 3.11 and 3.12 are the tested interpreters. v0.1.1 remains the Python 3.10-compatible line.
 
-## Installing via uv (Recommended)
-
-[uv](https://github.com/astral-sh/uv) provides instant, reproducible installations:
+v0.2.0 has not been published by this implementation task. The package-index commands install the available published release; they do not select this development checkout. To install this branch from the repository root:
 
 ```bash
-# Core package (SQLite backend + FAISS + BGE-small local embedder)
+uv sync --locked --extra all --extra dev --extra docs
+```
+
+To install the published package:
+
+```bash
 uv pip install longcache
-
-# With LangChain & LangGraph
-uv pip install "longcache[langchain]"
-
-# With Redis for multi-worker production
-uv pip install "longcache[redis]"
-
-# With LlamaIndex
-uv pip install "longcache[llamaindex]"
-
-# With OpenAI official client wrapper
-uv pip install "longcache[openai]"
-
-# With FastAPI / Starlette middleware
-uv pip install "longcache[server]"
-
-# Full installation (all integrations)
-uv pip install "longcache[all]"
+uv pip install 'longcache[openai,server,redis]'
 ```
 
-## Installing via pip
+The local model downloads weights on first use. Pin `embedder_revision` for a deployment, then cache the weights for offline operation. Custom embedders still use the current core package dependencies. See [migration](../migration-v0.2.md) before reusing an existing installation.
 
-```bash
-# Standard installation
-pip install longcache
-
-# Full bundle
-pip install "longcache[all]"
-```
-
-!!! tip "CPU PyTorch Optimization"
-    LongCache uses PyTorch purely for local embedding inference with `sentence-transformers`. In production environments without GPUs, you can install the lightweight CPU-only wheel of PyTorch (~180MB instead of ~3GB):
-    ```bash
-    pip install torch --index-url https://download.pytorch.org/whl/cpu
-    pip install longcache
-    ```
-
-## Offline Usage & First Run
-
-On the very first run, LongCache automatically downloads the compact **BAAI/bge-small-en-v1.5** model weights (~130MB) into your local Hugging Face cache (`~/.cache/huggingface/hub`).
-
-Once downloaded, LongCache works **100% offline** without any outgoing network connections required for embedding queries.
-
-To pre-warm the model in container builds (e.g. Dockerfile):
-
-```bash
-python -c "from longcache.core.embedder import LocalEmbedder; LocalEmbedder().embed('warmup')"
-```
+For the tested CPU runtime, install `torch==2.14.0+cpu` from `https://download.pytorch.org/whl/cpu` before installing the wheel. Installer index settings in the project's lockfile do not become wheel dependency metadata.
