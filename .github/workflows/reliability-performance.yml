@@ -1,0 +1,47 @@
+name: Controlled reliability performance
+
+on:
+  workflow_dispatch:
+    inputs:
+      reference_host_id:
+        description: Predeclared controlled host identifier
+        required: true
+        type: string
+      real_model:
+        description: Include pinned real-model inference
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  performance:
+    runs-on: [self-hosted, longcache-benchmark]
+    timeout-minutes: 240
+    env:
+      REFERENCE_HOST_ID: ${{ inputs.reference_host_id }}
+      REAL_MODEL: ${{ inputs.real_model }}
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install the locked environment
+        run: uv sync --locked --python 3.12 --extra all --extra dev
+      - name: Prepare the actual v0.2 baseline
+        run: |
+          mkdir -p "$RUNNER_TEMP/longcache-v02"
+          git archive 6a059e7 | tar -x -C "$RUNNER_TEMP/longcache-v02"
+      - name: Run the frozen reliability protocol
+        shell: bash
+        run: |
+          model_args=()
+          if [ "$REAL_MODEL" = true ]; then model_args+=(--real-model); fi
+          uv run --no-sync python -m evaluation.reliability --baseline-root "$RUNNER_TEMP/longcache-v02" --release --reference-host-id "$REFERENCE_HOST_ID" "${model_args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reliability-performance
+          path: evaluation/reports/v0_3_reliability*

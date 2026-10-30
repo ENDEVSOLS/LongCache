@@ -25,6 +25,8 @@ class LookupDecision:
     similarity: float | None = None
     entry_id: int | None = None
     threshold: float | None = None
+    _epoch: int | None = field(default=None, repr=False, compare=False)
+    _expires_at: float | None = field(default=None, repr=False, compare=False)
 
     def inspection(self) -> dict:
         return {

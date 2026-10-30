@@ -6,6 +6,7 @@ checks application wiring and freshness, not live-provider answer accuracy.
 
 import asyncio
 from dataclasses import asdict
+import argparse
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ from longcache import CacheConfig, LongCache
 from longcache.core.embedder import LocalEmbedder
 
 
-async def evaluate():
+async def evaluate(output=Path("evaluation/reports/versioned_rag_current.json")):
     embedder = LocalEmbedder(revision="5c38ec7c405ec4b44b94cc5a9bb96e735b38267a")
     rows = []
     with tempfile.TemporaryDirectory() as directory:
@@ -62,10 +63,15 @@ async def evaluate():
             "Customer dataset review, answer quality and hosted CI are separate release gates.",
         ],
     }
-    path = Path("evaluation/reports/versioned_rag.json")
+    path = output
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 
 
 if __name__ == "__main__":
-    asyncio.run(evaluate())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output", type=Path, default=Path("evaluation/reports/versioned_rag_current.json")
+    )
+    asyncio.run(evaluate(parser.parse_args().output))

@@ -70,7 +70,9 @@ class SQLiteCacheBackend(AbstractCacheBackend):
     INSERT OR IGNORE INTO cache_stats(key, value) VALUES ('total_saved_ms', 0);
     """
 
-    def __init__(self, db_path: str = ".longcache/cache.db", max_entries: int = 10_000):
+    def __init__(
+        self, db_path: str = ".longcache/cache.db", max_entries: int = 10_000, timeout: float = 2.0
+    ):
         """
         Initialize the SQLite backend.
 
@@ -84,7 +86,15 @@ class SQLiteCacheBackend(AbstractCacheBackend):
         self._db_path = db_path
         self._max_entries = max_entries
         self._lock = threading.RLock()
-        self._local = threading.local()
+        if sqlite3.threadsafety == 0:
+            raise RuntimeError("SQLite build does not support cross-thread cache use")
+        self._connection = (
+            sqlite3.connect(db_path, timeout=timeout, check_same_thread=False)
+            if db_path == ":memory:"
+            else None
+        )
+        self._timeout = timeout
+        self._closed = False
 
         # Ensure directory exists
         db_dir = os.path.dirname(db_path)
@@ -142,10 +152,13 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             raise
 
     def read_manifest(self):
-        row = (
-            self._get_connection().execute("SELECT data FROM cache_manifest WHERE id=1").fetchone()
-        )
-        return json.loads(row[0]) if row else None
+        with self._lock:
+            row = (
+                self._get_connection()
+                .execute("SELECT data FROM cache_manifest WHERE id=1")
+                .fetchone()
+            )
+            return json.loads(row[0]) if row else None
 
     def ensure_manifest(self, manifest: dict) -> None:
         from longcache.core.identity import canonical
@@ -159,27 +172,23 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                 raise ValueError("Incompatible embedding or storage generation; use a new store")
 
     def _get_connection(self) -> sqlite3.Connection:
-        """
-        Get a thread-local database connection.
-
-        Each thread gets its own connection to avoid SQLite threading issues.
-        Connections are cached per-thread for performance.
-
-        Returns:
-            sqlite3.Connection instance.
-        """
-        if not hasattr(self._local, "connection") or self._local.connection is None:
-            conn = sqlite3.connect(self._db_path, timeout=30.0)
+        """Return the owned connection; callers serialize all use with ``_lock``."""
+        if self._closed:
+            raise RuntimeError("SQLite backend is closed")
+        if self._connection is None:
+            conn = sqlite3.connect(self._db_path, timeout=self._timeout, check_same_thread=False)
             conn.row_factory = sqlite3.Row
-            self._local.connection = conn
-        return self._local.connection
+            self._connection = conn
+        self._connection.row_factory = sqlite3.Row
+        return self._connection
 
     def close(self) -> None:
-        """Close the connection owned by the calling thread."""
-        connection = getattr(self._local, "connection", None)
-        if connection is not None:
-            connection.close()
-            self._local.connection = None
+        """Close the backend-owned connection once, after admitted users drain."""
+        with self._lock:
+            self._closed = True
+            if self._connection is not None:
+                self._connection.close()
+                self._connection = None
 
     def _entry_to_row(self, entry: CacheEntry) -> dict:
         """Convert a CacheEntry to a row dict for database insertion."""

@@ -9,3 +9,9 @@ A populated generation whose manifest is missing fails closed. Do not recreate i
 Redis persists responses and TTLs. The FAISS index stays local: use **one LongCache process per cache generation**. Shared response storage alone is not multi-instance consistency.
 
 `backend="async_redis"` fails immediately through `LongCache`. `AsyncRedisCacheBackend` remains a standalone experimental storage adapter with separate tests.
+
+v0.3 sets explicit connect/socket deadlines through `backend_timeout_seconds` and
+adds in-process singleflight for supported execution methods. Neither change makes
+Redis-backed FAISS indexes consistent between instances. Compatible format-2 keys
+keep the `v2` prefix. Cache-owned Redis clients are closed after resource users drain;
+see [reliability](../reliability.md).

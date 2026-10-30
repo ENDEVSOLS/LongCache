@@ -1,5 +1,60 @@
 # Evaluation and benchmarks
 
+## v0.3 reliability protocol
+
+The [v0.3 execution record](plans/v0.3.0-execution.md) records the new local evidence.
+Historical v0.2 reports below remain unchanged. Runtime code, datasets, model revisions,
+sample counts, source/lock/config hashes, Python, and hardware are recorded by each runner.
+
+Prepare an actual v0.2 baseline in a fresh directory:
+
+```bash
+mkdir -p /tmp/longcache-v02
+git archive 6a059e7 | tar -x -C /tmp/longcache-v02
+uv run --no-sync python -m evaluation.reliability --baseline-root /tmp/longcache-v02 --smoke
+uv run --no-sync python -m evaluation.reliability --baseline-root /tmp/longcache-v02 --quick-concurrency
+```
+
+Smoke mode validates the runner with short samples. Quick-concurrency mode retains
+five repeats and 10,000 warm observations per flat/HNSW × 1K/10K cell, while reducing
+concurrency samples. Both explicitly report incomplete release evidence. p99 is
+omitted for cells below 10,000 observations. The local deterministic warm comparison
+and enabled/disabled measurement budgets passed; these are not production latency claims.
+
+The full protocol uses 10,000 miss observations per principal cell and 500 cold bursts
+of 20 callers per mode. It may take hours, especially with real-model inference.
+Run it without competing workload on the predeclared controlled host:
+
+```bash
+uv run --no-sync python -m evaluation.reliability --baseline-root /tmp/longcache-v02 --release --reference-host-id approved-host-name --real-model
+```
+
+The `Controlled reliability performance` workflow is manual and requires a
+self-hosted runner labeled `longcache-benchmark`, its prepared locked environment,
+and the pinned model snapshot. It never runs automatically on push. Normal CI covers
+deterministic correctness rather than shared-runner timing claims.
+
+The report compares actual isolated baseline/candidate processes in alternating order,
+includes per-repeat summaries and raw warm samples, tests balanced measurement on/off,
+and reports closed-loop plus scheduled-arrival latency (including queue delay). It
+publishes actual origin counts, errors/capacity outcomes, throughput, RSS, and resource
+snapshots. Concurrency 100 intentionally exercises default bounded capacity and is
+reported as overload rather than silently excluding failures. Timing uses memory
+storage; real Redis and SQLite behavior are covered by the acceptance matrix.
+
+Reproduce the frozen safety and application-freshness protocols without overwriting
+the historical v0.2 reports:
+
+```bash
+uv run --no-sync python -m evaluation.run --config evaluation/configs/v0_3_safety.json
+uv run --no-sync python -m evaluation.rag --output evaluation/reports/v0_3_rag.json
+```
+
+The v0.3 safety configuration changes the output path only; dataset, model revision,
+threshold, and quality gates are identical to the frozen v0.2 protocol. The historical
+v0.1.1 paired runner now accepts the current package version and writes
+`warm_lookup_current.json`; it supplements the new actual-v0.2 reliability comparison.
+
 ## Recorded local results
 
 The validation receipt is `validation/v0.2.0.json`; detailed JSON and pytest reports are in repository `evaluation/reports/`.

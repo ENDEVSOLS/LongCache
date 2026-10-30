@@ -1,0 +1,29 @@
+{
+  "protocol": "reliability-v1",
+  "seed": 303,
+  "threshold": 0.92,
+  "cache_sizes": [1000, 10000],
+  "indexes": ["flat", "hnsw"],
+  "repeats": 5,
+  "burst_repeats": 500,
+  "warm_samples_per_repeat": 2000,
+  "miss_requests_per_repeat": 2000,
+  "concurrencies": [1, 20, 100],
+  "provider_delay_ms": 100,
+  "minimum_percentile_samples": 10000,
+  "warmup": 20,
+  "model": "BAAI/bge-small-en-v1.5",
+  "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+  "output": "evaluation/reports/v0_3_reliability",
+  "budgets": {
+    "warm_p95_multiplier": 1.15,
+    "warm_p95_add_ms": 1.0,
+    "warm_p99_multiplier": 1.2,
+    "warm_p99_add_ms": 2.0,
+    "measurement_p95_multiplier": 1.05,
+    "measurement_p95_add_ms": 0.5,
+    "distinct_miss_throughput_ratio_min": 0.9,
+    "singleflight_origin_calls": 1,
+    "singleflight_added_p95_ms_max": 5.0
+  }
+}

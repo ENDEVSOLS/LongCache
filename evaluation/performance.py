@@ -149,7 +149,9 @@ def main():
     parser.add_argument("--baseline-root", type=Path)
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--legacy", action="store_true")
-    parser.add_argument("--output", type=Path, default=Path("evaluation/reports/warm_lookup.json"))
+    parser.add_argument(
+        "--output", type=Path, default=Path("evaluation/reports/warm_lookup_current.json")
+    )
     args = parser.parse_args()
     if args.worker:
         worker(args.legacy)
@@ -186,7 +188,10 @@ def main():
             )
             processes.append(process)
             identities.append(reply(process))
-        assert identities[0]["version"] == "0.2.0" and identities[1]["version"] == "0.1.1"
+        assert (
+            identities[0]["version"] == longcache.__version__
+            and identities[1]["version"] == "0.1.1"
+        )
         current, previous = [], []
         samples = []
         for kind in ("flat", "hnsw"):
@@ -200,7 +205,9 @@ def main():
                 rows = paired_samples(processes, reply, 50)
                 current.append({"index": kind, "entries": size, **summarize(rows[0])})
                 previous.append({"index": kind, "entries": size, **summarize(rows[1])})
-                samples.append({"index": kind, "entries": size, "v02": rows[0], "v011": rows[1]})
+                samples.append(
+                    {"index": kind, "entries": size, "candidate": rows[0], "v011": rows[1]}
+                )
         gates = comparisons(current, previous)
         report = {
             "protocol": "paired-warm-hit-v2",
@@ -219,7 +226,7 @@ def main():
                 )
             ).hexdigest(),
             "worker_identities": identities,
-            "v02": current,
+            "candidate": current,
             "v011": previous,
             "comparisons": gates,
             "comparison_passed": all(r["passed"] for r in gates),

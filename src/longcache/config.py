@@ -41,6 +41,13 @@ class CacheConfig:
     db_path: str = ".longcache/v2/cache.db"
     redis_url: str = "redis://localhost:6379/0"
     track_stats: bool = True
+    singleflight_enabled: bool = True
+    singleflight_wait_timeout_seconds: float = 30.0
+    singleflight_max_inflight: int = 1024
+    singleflight_max_waiters_per_key: int = 256
+    cache_error_policy: str = "raise"
+    backend_timeout_seconds: float = 2.0
+    shutdown_timeout_seconds: float = 5.0
     faiss_index_type: str = "flat"
     hnsw_m: int = 32
     hnsw_ef_search: int = 64
@@ -59,6 +66,24 @@ class CacheConfig:
     def __post_init__(self):
         """Validate configuration values after initialization."""
         import re
+        import math
+
+        for name in ("singleflight_enabled", "track_stats"):
+            if type(getattr(self, name)) is not bool:
+                raise ValueError(f"{name} must be a boolean")
+        for name in ("singleflight_max_inflight", "singleflight_max_waiters_per_key"):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        for name in (
+            "singleflight_wait_timeout_seconds",
+            "backend_timeout_seconds",
+            "shutdown_timeout_seconds",
+        ):
+            value = getattr(self, name)
+            if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be positive and finite")
+        if self.cache_error_policy not in ("raise", "bypass"):
+            raise ValueError("Invalid cache_error_policy")
 
         if self.scope_policy not in ("private", "tenant_shared", "public"):
             raise ValueError("Invalid scope_policy")

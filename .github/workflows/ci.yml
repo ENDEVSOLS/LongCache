@@ -19,6 +19,7 @@ jobs:
         run: make lint
 
   test:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -36,6 +37,9 @@ jobs:
           --health-retries 10
     env:
       LONGCACHE_TEST_REDIS_URL: redis://localhost:16379/0
+      LONGCACHE_TEST_MODEL: '1'
+      OMP_NUM_THREADS: '1'
+      MKL_NUM_THREADS: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,10 +70,13 @@ jobs:
 
       - name: Evaluate changing-document RAG workflow
         if: matrix.python-version == '3.12'
-        run: uv run --no-sync python -m evaluation.rag
+        run: uv run --no-sync python -m evaluation.rag --output evaluation/reports/v0_3_rag.json
 
       - name: Run offline public-interface example
         run: uv run --no-sync python examples/safe_reuse.py
+
+      - name: Run offline reliability example
+        run: uv run --no-sync python examples/reliability.py
 
       - name: Validate documentation
         if: matrix.python-version == '3.12'
@@ -81,9 +88,10 @@ jobs:
           name: acceptance-${{ matrix.python-version }}
           path: |
             evaluation/reports/pytest-ci.xml
-            evaluation/reports/versioned_rag.json
+            evaluation/reports/v0_3_rag.json
 
   model-evaluation:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -97,7 +105,7 @@ jobs:
           path: |
             ~/.cache/uv
             ~/.cache/huggingface
-          key: model-${{ runner.os }}-${{ hashFiles('uv.lock', 'evaluation/configs/v0_2_release.json') }}
+          key: model-${{ runner.os }}-${{ hashFiles('uv.lock', 'evaluation/configs/v0_3_safety.json') }}
       - run: pip install uv
       - run: uv sync --locked --extra all --extra dev
       - name: Validate real-model embeddings
@@ -107,13 +115,13 @@ jobs:
           mkdir -p /tmp/longcache-v011
           git archive 8a47ebd | tar -x -C /tmp/longcache-v011
       - name: Evaluate frozen synthetic correctness gates
-        run: uv run --no-sync python -m evaluation.run --config evaluation/configs/v0_2_release.json --baseline-root /tmp/longcache-v011
+        run: uv run --no-sync python -m evaluation.run --config evaluation/configs/v0_3_safety.json --baseline-root /tmp/longcache-v011
       - name: Evaluate warm-hit latency budget
         run: uv run --no-sync python -m evaluation.performance --baseline-root /tmp/longcache-v011
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: v02-evaluation
+          name: v03-evaluation
           path: evaluation/reports/
 
   build:
@@ -135,15 +143,19 @@ jobs:
           name: distributions
           path: dist/
       - run: pip install uv
-      - name: Verify clean wheel install and CLI
+      - name: Verify clean wheel on supported Python versions
         run: |
-          uv venv /tmp/wheel-check --python 3.12
-          uv pip install --python /tmp/wheel-check/bin/python "torch==2.14.0+cpu" --index-url https://download.pytorch.org/whl/cpu
-          uv pip install --python /tmp/wheel-check/bin/python dist/*.whl
-          /tmp/wheel-check/bin/python -c "import longcache; assert longcache.__version__ == '0.2.0'"
-          /tmp/wheel-check/bin/longcache --version
+          for python_version in 3.11 3.12; do
+            uv python install "$python_version"
+            uv venv "/tmp/wheel-check-$python_version" --python "$python_version"
+            wheel_python="/tmp/wheel-check-$python_version/bin/python"
+            uv pip install --python "$wheel_python" "torch==2.14.0+cpu" --index-url https://download.pytorch.org/whl/cpu
+            uv pip install --python "$wheel_python" dist/*.whl
+            PYTHONPATH= "$wheel_python" scripts/wheel_smoke_v3.py
+            "/tmp/wheel-check-$python_version/bin/longcache" --version
+          done
       - name: Verify Python 3.10 rejection
         run: |
           uv python install 3.10
           uv venv /tmp/python310 --python 3.10
-          python scripts/check_python_requirement.py --python /tmp/python310/bin/python --wheel dist/longcache-0.2.0-py3-none-any.whl
+          python scripts/check_python_requirement.py --python /tmp/python310/bin/python --wheel dist/longcache-0.3.0-py3-none-any.whl

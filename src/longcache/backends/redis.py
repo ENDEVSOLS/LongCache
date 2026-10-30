@@ -47,6 +47,7 @@ class RedisCacheBackend(AbstractCacheBackend):
         max_entries: int = 10_000,
         cache_id: str = "default",
         generation: str = "default",
+        timeout: float = 2.0,
     ):
         """
         Initialize the Redis backend.
@@ -70,7 +71,16 @@ class RedisCacheBackend(AbstractCacheBackend):
         self._redis_url = redis_url
         self._max_entries = max_entries
         self._lock = threading.RLock()
-        self._client = redis.Redis.from_url(redis_url, decode_responses=True)
+        from redis.backoff import NoBackoff
+        from redis.retry import Retry
+
+        self._client = redis.Redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=timeout,
+            socket_timeout=timeout,
+            retry=Retry(NoBackoff(), 0),
+        )
 
     def read_manifest(self):
         data = self._client.get(self.ROOT + ":manifest")

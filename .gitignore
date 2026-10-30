@@ -81,5 +81,5 @@ test_cache.db
 models/
 
 # Evaluation and validation outputs
-/evaluation/
+/evaluation/reports/
 /validation/

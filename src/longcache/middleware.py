@@ -6,6 +6,7 @@ import inspect
 import json
 from longcache import CacheConfig, LongCache, RequestScope
 from longcache.integrations.openai import prepare_request
+from longcache import CacheError
 
 
 def _object(pairs):
@@ -31,6 +32,7 @@ class LongCacheMiddleware:
         scope_resolver=None,
     ):
         self.app = app
+        self._owns_cache = cache is None
         self.cache = cache if cache is not None else LongCache(config or CacheConfig())
         self.namespace = namespace
         self.routes = set(cached_routes or {"/v1/chat/completions", "/chat/completions"})
@@ -108,6 +110,11 @@ class LongCacheMiddleware:
         if isinstance(data, dict):
             prepared, reason = prepare_request(data, base, "openai-dict-v1")
         if prepared is None:
+            self.cache._observability.count("requests", operation="lookup", outcome="bypass")
+            self.cache._observability.count(
+                "decisions", operation="lookup", outcome="bypass", reason=reason
+            )
+            self.cache._observability.event(entry_point="asgi", outcome="bypass", reason=reason)
             await self.app(scope, replay, self._decision_send(send, "BYPASS", reason))
             return
         query, ctx = prepared
@@ -164,7 +171,19 @@ class LongCacheMiddleware:
                 response = json.loads(b"".join(parts), object_pairs_hook=_object)
             except (ValueError, UnicodeDecodeError):
                 return
-            await self.cache.aset(query, response, self.namespace, context=ctx)
+            try:
+                await self.cache.aset(query, response, self.namespace, context=ctx)
+            except CacheError:
+                # Upstream already sent its response. It cannot be retracted or
+                # safely executed again because optional persistence failed.
+                self.cache._observability.event(
+                    warning=True, stage="store", reason="cache_unavailable"
+                )
+
+    async def aclose(self):
+        """Wire into application lifespan when this middleware created its cache."""
+        if self._owns_cache:
+            await self.cache.aclose()
 
     @staticmethod
     def _replay(frames, receive):

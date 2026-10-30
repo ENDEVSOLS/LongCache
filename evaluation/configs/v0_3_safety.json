@@ -1,0 +1,20 @@
+{
+  "protocol": "safe-reuse-v1",
+  "dataset": "evaluation/data/seeds.json",
+  "model": "BAAI/bge-small-en-v1.5",
+  "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+  "threshold": 0.92,
+  "policy_version": "safe-reuse-v1",
+  "batch_size": 64,
+  "torch_threads": 1,
+  "output": "evaluation/reports/v0_3_safety",
+  "gates": {
+    "false_hit_rate_max": 0.005,
+    "false_hit_upper_95_max": 0.01,
+    "accepted_hits_min": 1000,
+    "safe_paraphrase_coverage_min": 0.6,
+    "verification_p95_ms_max": 5.0,
+    "isolation_errors_max": 0,
+    "unsupported_bypass_rate_min": 1.0
+  }
+}

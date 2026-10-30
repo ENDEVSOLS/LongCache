@@ -114,8 +114,9 @@ class SimilarityIndex:
         async with self._get_async_lock():
             self.add(vector, entry_id)
 
-    def candidates(self, vector, namespace, threshold, limit):
+    def candidates(self, vector, namespace, threshold, limit, *, retrieve=None):
         """Return scored eligible snapshots without recording hits or invoking hooks."""
+        retrieve = retrieve or self._backend.retrieve
         with self._lock:
             if self._faiss_index is None or self._faiss_index.ntotal == 0:
                 return []
@@ -131,7 +132,7 @@ class SimilarityIndex:
                     if identifier is None or identifier in seen or score < threshold:
                         continue
                     seen.add(identifier)
-                    entry = self._backend.retrieve(identifier)
+                    entry = retrieve(identifier)
                     if (
                         entry is not None
                         and entry.namespace == namespace

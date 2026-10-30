@@ -64,6 +64,20 @@ def prepare_request(kwargs, base, codec):
     ), None
 
 
+def snapshot_request(kwargs, query, context):
+    """Reconstruct the validated subset from the same snapshot used for identity."""
+    request = {
+        "model": context.model,
+        "messages": [{"role": i.role, "content": i.content} for i in context.instructions]
+        + [{"role": "user", "content": query}],
+    }
+    if "temperature" in context.generation:
+        request["temperature"] = context.generation["temperature"]
+    if "stream" in kwargs:
+        request["stream"] = False
+    return request
+
+
 class CachedOpenAI:
     def __init__(
         self,
@@ -76,6 +90,7 @@ class CachedOpenAI:
         response_codec=None,
     ):
         self._client = client
+        self._owns_cache = cache is None
         self.cache = cache if cache is not None else LongCache(config or CacheConfig())
         self._namespace = namespace
         self.context = context
@@ -95,6 +110,29 @@ class CachedOpenAI:
 
     def __getattr__(self, name):
         return getattr(self._client, name)
+
+    def close(self):
+        """Close only an internally constructed cache; the provider client is borrowed."""
+        if self._owns_cache:
+            self.cache.close()
+
+    async def aclose(self):
+        if self._owns_cache:
+            await self.cache.aclose()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        if self._owns_cache:
+            return self.cache.__exit__(exc_type, exc, traceback)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        if self._owns_cache:
+            return await self.cache.__aexit__(exc_type, exc, traceback)
 
 
 class _ChatProxy:
@@ -123,18 +161,22 @@ class CachedChatCompletions:
 
     def create(self, *, cache_context=None, **kwargs):
         parent = self._parent
-        prepared, _ = prepare_request(
+        prepared, reason = prepare_request(
             kwargs, cache_context if cache_context is not None else parent.context, parent.codec
         )
         if prepared is None:
-            return parent._client.chat.completions.create(**kwargs)
+            return parent.cache._pass_through(
+                lambda: parent._client.chat.completions.create(**kwargs), reason, "openai"
+            )
         query, ctx = prepared
-        decision = parent.cache.lookup(query, parent._namespace, context=ctx)
-        if decision.outcome == "HIT":
-            return decision.response
-        result = parent._client.chat.completions.create(**kwargs)
-        parent.cache.set(query, result, parent._namespace, context=ctx)
-        return result
+        kwargs = snapshot_request(kwargs, query, ctx)
+        return parent.cache.get_or_compute(
+            query,
+            lambda: parent._client.chat.completions.create(**kwargs),
+            namespace=parent._namespace,
+            context=ctx,
+            _entry_point="openai",
+        )
 
     async def acreate(self, *, cache_context=None, **kwargs):
         parent = self._parent
@@ -146,18 +188,20 @@ class CachedChatCompletions:
         )
         if not inspect.iscoroutinefunction(call):
             raise TypeError("An async OpenAI client is required")
-        prepared, _ = prepare_request(
+        prepared, reason = prepare_request(
             kwargs, cache_context if cache_context is not None else parent.context, parent.codec
         )
         if prepared is None:
-            return await call(**kwargs)
+            return await parent.cache._apass_through(lambda: call(**kwargs), reason, "openai")
         query, ctx = prepared
-        decision = await parent.cache.alookup(query, parent._namespace, context=ctx)
-        if decision.outcome == "HIT":
-            return decision.response
-        result = await call(**kwargs)
-        await parent.cache.aset(query, result, parent._namespace, context=ctx)
-        return result
+        kwargs = snapshot_request(kwargs, query, ctx)
+        return await parent.cache.aget_or_compute(
+            query,
+            lambda: call(**kwargs),
+            namespace=parent._namespace,
+            context=ctx,
+            _entry_point="openai",
+        )
 
 
 class AsyncCachedChatCompletions(CachedChatCompletions):

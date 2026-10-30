@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import Mock, AsyncMock
 import json
@@ -35,8 +36,9 @@ async def test_openai_scoped_replay_and_context_changes(async_mode):
         wrapped = CachedOpenAI(upstream, cache=cache, context=context())
 
         async def invoke(**kwargs):
-            result = wrapped.chat.completions.create(**kwargs)
-            return await result if async_mode else result
+            if async_mode:
+                return await wrapped.chat.completions.create(**kwargs)
+            return await asyncio.to_thread(wrapped.chat.completions.create, **kwargs)
 
         assert await invoke(**payload()) == completion()
         assert await invoke(**payload()) == completion()

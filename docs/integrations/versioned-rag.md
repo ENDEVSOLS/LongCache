@@ -8,7 +8,7 @@ A repeated question can need a new answer after its source documents change. Ret
 4. Look up the question in that context. On a miss, generate from that exact snapshot and store with the same context.
 5. When documents change, use their new revisions. In-flight results from an old snapshot remain in its old partition.
 
-Do not read a mutable "current revision" again after generation and attach it to an answer generated from older documents. Application-managed versions are required; generic retrieval adapters do not discover this metadata automatically in v0.2.
+Do not read a mutable "current revision" again after generation and attach it to an answer generated from older documents. Application-managed versions are required; generic retrieval adapters do not discover this metadata automatically in v0.3.
 
 ## Runnable repository example
 

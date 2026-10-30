@@ -2,6 +2,30 @@
 
 All notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.0] - Unreleased
+
+### Added
+
+- Scoped sync/async `get_or_compute` methods and singleflight for supported decorators/OpenAI calls, with bounded flights, followers, replay bytes, and worker queues.
+- Explicit follower timeouts, leader error/cancellation outcomes, reentrancy protection, and in-process invalidation fences.
+- Strict (`raise`, default) and opt-in `bypass` runtime cache-error policies. Partial mutation quarantines the instance without retrying the origin.
+- Async close/context managers, tracked cancellation, bounded shutdown, and redacted decision logs plus bounded process metrics.
+- Repeatable paired reliability benchmarks, scheduled-arrival workloads, measurement-overhead checks, and installed-wheel concurrency smoke checks.
+
+### Changed
+
+- SQLite owns one serialized connection; worker cancellation cannot leak thread-local connections or permit late writes. Redis/SQLite I/O deadlines are explicit.
+- Concurrent identical cacheable calls may share a completion. Disable singleflight when independent origin samples are needed; manual lookup/store pairs remain independent.
+- Blocking shared execution is rejected on an event-loop thread. Provider clients and supplied caches remain caller-owned.
+- Scoped statistics have bounded retained windows with reset metadata; aggregate process counts stay exact. Oversized new responses are not admitted.
+- ASGI preserves an already-sent response if optional cache persistence fails afterward; generic HTTP invocation coalescing remains deferred.
+
+### Compatibility and validation
+
+- Python minimum and format-2 identity/storage remain unchanged. Compatible v0.2 stores require no reset; streaming, opaque framework paths and standalone async Redis retain their support limits.
+- Prometheus, OpenTelemetry, and new JSON-schema/Pydantic caching are deferred.
+- Local implementation evidence and remaining controlled-performance/hosted-CI/candidate gates are recorded in `docs/plans/v0.3.0-execution.md`. No push, tag, or publication is performed by this implementation.
+
 ## [0.2.0] - Unreleased
 
 ### Added
