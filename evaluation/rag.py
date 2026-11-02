@@ -53,6 +53,39 @@ async def evaluate(output=Path("evaluation/reports/versioned_rag_current.json"))
                         rows.append({"backend": backend, "index": index, "passed": True})
                     finally:
                         cache.clear(operator=True)
+        for index in ("flat", "hnsw"):
+            config = CacheConfig(
+                backend="redis",
+                deployment_mode="shared",
+                faiss_index_type=index,
+                redis_url=os.environ.get("LONGCACHE_TEST_REDIS_URL", "redis://localhost:16379/0"),
+                cache_id="shared-rag-evaluation-" + uuid4().hex,
+                generation="v04",
+                ttl_seconds=0,
+            )
+            with LongCache(config, embedder=embedder) as first:
+                with LongCache(config, embedder=embedder) as second:
+                    try:
+                        question = "What is the return window?"
+                        old = DocumentSnapshot("1", "Returns accepted within 30 days.")
+                        new = DocumentSnapshot("2", "Returns accepted within 14 days.")
+                        assert await answer(first, question, old) == old.text
+                        assert await answer(second, question, old) == old.text
+                        assert await answer(second, question, new) == new.text
+                        assert await answer(first, question, new) == new.text
+                        assert (
+                            first.invalidate_by_tag(
+                                old.document_id, context=old.context("shop", "alice")
+                            )
+                            == 1
+                        )
+                        assert second.get(question, context=old.context("shop", "alice")) is None
+                        assert (
+                            second.get(question, context=new.context("shop", "alice")) == new.text
+                        )
+                        rows.append({"backend": "shared_redis", "index": index, "passed": True})
+                    finally:
+                        first.clear(operator=True)
     report = {
         "protocol": "changing-document-rag-v1",
         "embedding": asdict(embedder.descriptor),

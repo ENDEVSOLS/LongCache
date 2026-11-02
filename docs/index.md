@@ -99,6 +99,7 @@ Async applications use `await cache.alookup(...)`, `await cache.aget(...)`, and 
 | OpenAI sync/async chat completions | Supported single-turn text subset with dict/SDK response replay |
 | ASGI middleware | Supported bounded single-turn JSON subset with trusted scope resolution; no HTTP invocation coalescing |
 | Memory, SQLite, synchronous Redis storage | Supported within one cache process |
+| Opt-in Shared Redis mode (`deployment_mode="shared"`) | v0.4 development; multi-process deployment over one Redis authority, release qualification open; see [shared deployment](deployment.md) |
 | Standalone async Redis backend | Experimental storage interface; unsupported through `LongCache` |
 | Generic LangChain, LangGraph, and LlamaIndex adapters | Compatibility pass-through; opaque execution state is not cached |
 | All streaming helpers | Pass-through; no cache reads or writes |
@@ -128,7 +129,7 @@ The middleware bounds request and response capture to 1 MiB by default. Unsuppor
 
 ## Storage and custom embeddings
 
-SQLite defaults to `.longcache/v2/cache.db`. Redis uses a fully versioned `longcache:v2:<cache_id>:<generation>:...` keyspace. Redis persists responses but does not synchronize in-memory FAISS indexes: use one LongCache process per generation.
+SQLite defaults to `.longcache/v2/cache.db`. Redis uses a fully versioned `longcache:v2:<cache_id>:<generation>:...` keyspace in single-process mode, or `longcache:shared-v1:<cache_id>:<generation>:...` in opt-in shared mode. Single-process Redis persists responses but does not synchronize in-memory FAISS indexes: use one LongCache process per generation. For multi-process synchronization and distributed request coalescing, configure `deployment_mode="shared"`; see [shared Redis deployment](deployment.md).
 
 Inject `LongCache(..., embedder=my_embedder)` using `BaseEmbedder`. Supply an `EmbeddingDescriptor(model, revision, dimension, preprocessing, normalization)` with immutable revision identity. Vectors must be contiguous, finite, L2-normalized `float32` arrays; batches include shape `(0, dimension)` for empty input. Calls are serialized per embedder. The default model resolves its downloaded commit hash, or accepts `embedder_revision` explicitly.
 

@@ -1,9 +1,10 @@
 # Reliability in v0.3
 
-LongCache coordinates reusable requests within **one cache instance in one process**.
+In the default single-process mode, LongCache coordinates reusable requests within **one cache instance in one process**.
 Python 3.11 and 3.12, memory/SQLite/synchronous Redis, and flat/HNSW indexes remain
-the supported matrix. A Redis store does not synchronize FAISS indexes or flights
-between instances or processes.
+the supported single-process matrix. In this mode, Redis does not synchronize FAISS indexes or flights
+between instances. The v0.4 development line adds an opt-in `deployment_mode="shared"` using distributed
+leases, an authoritative mutation journal, and atomic Redis replay guards; see [shared Redis deployment](deployment.md).
 
 ## Shared execution
 

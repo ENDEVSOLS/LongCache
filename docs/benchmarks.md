@@ -1,5 +1,33 @@
 # Evaluation and benchmarks
 
+## v0.4 multi-instance deployment protocol
+
+The [v0.4 execution record](plans/v0.4.0-execution.md) and [v0.4 plan](plans/v0.4.0.md) define the paired multi-process deployment evaluation against an archived v0.3 baseline (`e384615`).
+
+To run the deployment benchmark:
+
+```bash
+mkdir -p /tmp/longcache-v03-baseline
+git archive e384615 | tar -x -C /tmp/longcache-v03-baseline
+LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run python -m evaluation.deployment --baseline-root /tmp/longcache-v03-baseline --smoke
+```
+
+For full release qualification:
+```bash
+LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run python -m evaluation.deployment \
+    --baseline-root /tmp/longcache-v03-baseline \
+    --release \
+    --reference-host-id <qualified-host-name>
+```
+
+This protocol measures:
+- Flat and HNSW indexes at 1,000 and 10,000 entries across 5 repeats (10,000 warm reads per case for p99 confidence).
+- Cross-process write visibility and invalidation convergence latency.
+- Exact-request origin coalescing during concurrent 20-request bursts across independent OS processes.
+- Process RSS, Redis memory usage, and comparative throughput.
+
+The report outputs to `evaluation/reports/v0_4_deployment.json` (or `-smoke.json`).
+
 ## v0.3 reliability protocol
 
 The [v0.3 execution record](plans/v0.3.0-execution.md) records the new local evidence.

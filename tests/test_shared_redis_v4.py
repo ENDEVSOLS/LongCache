@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import get_context
 import asyncio
+import json
 import os
 import threading
 import time
@@ -12,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from longcache import CacheConfig, LongCache
+from longcache import CacheConfig, LongCache, RequestScope
 from longcache.core.errors import (
     CacheOperationError,
     SingleflightCapacityError,
@@ -144,6 +145,26 @@ def test_connection_pool_reconnect_revalidates_remote_invalidation(pair):
     assert second.get("question", context=context) == "new"
 
 
+def test_lost_or_recreated_generation_manifest_quarantines_old_process(pair):
+    first, second = pair
+    context = trusted_context()
+    assert first.set("question", "answer", context=context).outcome == "STORED"
+    assert second.get("question", context=context) == "answer"
+    key = first.backend.ROOT + ":manifest"
+    original = first.backend._client.get(key)
+    try:
+        first.backend._client.delete(key)
+        with pytest.raises(ValueError, match="changed or lost"):
+            second.get("question", context=context)
+        changed = json.loads(original)
+        changed["incarnation"] = uuid4().hex
+        first.backend._client.set(key, json.dumps(changed, sort_keys=True, separators=(",", ":")))
+        with pytest.raises(ValueError, match="changed or lost"):
+            second.get("question", context=context)
+    finally:
+        first.backend._client.set(key, original)
+
+
 def test_tag_invalidation_fences_write_missing_from_its_pre_read(pair, monkeypatch):
     first, second = pair
     context = trusted_context()
@@ -224,6 +245,110 @@ def test_shared_lease_capacity_and_expiry():
         cache.backend.release_flight(key_one, token_one)
         assert cache.backend._client.zcard(cache.backend.LEASES) == 1
         cache.backend.release_flight(key_three, token_three)
+
+
+def test_lost_store_response_resolves_same_operation_receipt(pair, monkeypatch):
+    import redis
+    from longcache.backends.redis_shared import _STORE
+
+    first, second = pair
+    context = trusted_context()
+    original = first.backend._client.eval
+    lost = False
+
+    def lose_first_response(script, *args):
+        nonlocal lost
+        result = original(script, *args)
+        if script == _STORE and not lost:
+            lost = True
+            raise redis.exceptions.ConnectionError("response lost after Redis commit")
+        return result
+
+    monkeypatch.setattr(first.backend._client, "eval", lose_first_response)
+    assert first.set("question", "answer", context=context).outcome == "STORED"
+    assert lost
+    assert first.backend.revision() == 1
+    assert first.backend._client.scard(first.backend.ALL_IDS) == 1
+    assert second.get("question", context=context) == "answer"
+
+
+def test_lost_invalidation_response_returns_original_count(pair, monkeypatch):
+    import redis
+    from longcache.backends.redis_shared import _INVALIDATE
+
+    first, second = pair
+    context = trusted_context()
+    assert first.set("question", "answer", context=context, tags=["doc"]).outcome == "STORED"
+    original = first.backend._client.eval
+    lost = False
+
+    def lose_first_response(script, *args):
+        nonlocal lost
+        result = original(script, *args)
+        if script == _INVALIDATE and not lost:
+            lost = True
+            raise redis.exceptions.ConnectionError("response lost after invalidation")
+        return result
+
+    monkeypatch.setattr(first.backend._client, "eval", lose_first_response)
+    assert first.invalidate_by_tag("doc", context=context) == 1
+    assert lost
+    assert first.backend.revision() == 2
+    assert first.backend.epoch() == 1
+    assert second.get("question", context=context) is None
+
+
+def test_shared_store_receipt_capacity_is_bounded():
+    config = CacheConfig.from_dict(
+        _config("receipt-cap-" + uuid4().hex).to_dict() | {"shared_max_receipts": 2}
+    )
+    with LongCache(config, embedder=HashEmbedder()) as cache:
+        context = trusted_context()
+        assert cache.set("one", "answer", context=context).outcome == "STORED"
+        assert cache.set("two", "answer", context=context).outcome == "STORED"
+        rejected = cache.set("three", "answer", context=context)
+        assert rejected.outcome == "REJECTED" and rejected.reason == "capacity"
+        assert cache.backend._client.zcard(cache.backend.RECEIPTS) == 2
+        expired_receipt = cache.backend._client.zrange(cache.backend.RECEIPTS, 0, 0)[0]
+        cache.backend._client.zadd(cache.backend.RECEIPTS, {expired_receipt: 0})
+        assert cache.set("three", "answer", context=context).outcome == "STORED"
+        assert cache.backend._client.zcard(cache.backend.RECEIPTS) == 2
+        expired_receipt = cache.backend._client.zrange(cache.backend.RECEIPTS, 0, 0)[0]
+        cache.backend._client.zadd(cache.backend.RECEIPTS, {expired_receipt: 0})
+        cache.clear(operator=True)
+
+
+def test_partition_tag_and_per_entry_metadata_limits():
+    config = CacheConfig.from_dict(
+        _config("metadata-cap-" + uuid4().hex).to_dict()
+        | {
+            "shared_max_partitions": 1,
+            "shared_max_distinct_tags": 1,
+            "shared_max_tags_per_entry": 1,
+            "shared_max_tag_chars": 3,
+        }
+    )
+    with LongCache(config, embedder=HashEmbedder()) as cache:
+        context = trusted_context()
+        other = trusted_context(scope=RequestScope("other-tenant", "other-user"))
+        assert cache.set("one", "answer", context=context, tags=["one"]).outcome == "STORED"
+        assert (
+            cache.set("two", "answer", context=context, tags=["one", "two"]).reason
+            == "tag_capacity"
+        )
+        assert cache.set("two", "answer", context=context, tags=["long"]).reason == "tag_capacity"
+        assert cache.set("two", "answer", context=context, tags=["two"]).reason == "capacity"
+        assert cache.set("two", "answer", context=other, tags=["one"]).reason == "capacity"
+        _, partition, _ = cache._prepare("maintenance", context, None, {})[0]
+        _, other_partition, _ = cache._prepare("maintenance", other, None, {})[0]
+        with pytest.raises(CacheOperationError, match="metadata_capacity"):
+            cache.backend.delete_by_tag("two", partition)
+        with pytest.raises(CacheOperationError, match="metadata_capacity"):
+            cache.backend.delete_namespace(other_partition)
+        assert cache.invalidate_by_tag("one", context=context) == 1
+        assert cache.backend._client.scard(cache.backend.NAMESPACE_SET) == 1
+        assert cache.backend._client.scard(cache.backend.TAGS) == 1
+        cache.clear(operator=True)
 
 
 @pytest.mark.asyncio

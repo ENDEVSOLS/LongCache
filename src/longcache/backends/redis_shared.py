@@ -21,8 +21,29 @@ from longcache.core.identity import canonical
 _STORE = """
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return redis.error_reply('incompatible manifest') end
 if redis.call('EXISTS', KEYS[11]) == 1 then return redis.error_reply('shared generation is uncertain') end
+local prior = redis.call('GET', KEYS[12])
+if prior then
+    local receipt = cjson.decode(prior)
+    if receipt.digest ~= ARGV[12] then return redis.error_reply('operation receipt mismatch') end
+    return {receipt.id, receipt.revision}
+end
 if redis.call('GET', KEYS[2]) ~= ARGV[2] then return 0 end
 if ARGV[10] ~= '' and redis.call('GET', ARGV[10]) ~= ARGV[11] then return 0 end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+local expired = redis.call('ZRANGEBYSCORE', KEYS[13], '-inf', now - 1, 'LIMIT', 0, 256)
+for _, key in ipairs(expired) do
+    redis.call('DEL', key)
+    redis.call('ZREM', KEYS[13], key)
+end
+if redis.call('ZCARD', KEYS[13]) >= tonumber(ARGV[13]) then return -2 end
+if redis.call('SISMEMBER', KEYS[5], ARGV[5]) == 0 and redis.call('SCARD', KEYS[5]) >= tonumber(ARGV[15]) then return -1 end
+local tags = cjson.decode(ARGV[6])
+local new_tags = 0
+for _, tag_key in ipairs(tags) do
+    if redis.call('SISMEMBER', KEYS[14], tag_key) == 0 then new_tags = new_tags + 1 end
+end
+if redis.call('SCARD', KEYS[14]) + new_tags > tonumber(ARGV[16]) then return -1 end
 if redis.call('SCARD', KEYS[4]) >= tonumber(ARGV[8]) then return -1 end
 if redis.call('SCARD', KEYS[6]) >= tonumber(ARGV[9]) then return -1 end
 redis.call('SET', KEYS[11], '1')
@@ -36,14 +57,18 @@ redis.call('SADD', KEYS[5], ARGV[5])
 redis.call('SADD', KEYS[6], id)
 redis.call('HSET', KEYS[9], id, ARGV[5])
 redis.call('HSET', KEYS[10], id, ARGV[6])
-local tags = cjson.decode(ARGV[6])
-for _, tag_key in ipairs(tags) do redis.call('SADD', tag_key, id) end
+for _, tag_key in ipairs(tags) do
+    redis.call('SADD', KEYS[14], tag_key)
+    redis.call('SADD', tag_key, id)
+end
 local ttl = tonumber(ARGV[7])
 if ttl > 0 then redis.call('PEXPIRE', key, ttl) end
 local revision = redis.call('INCR', KEYS[7])
 redis.call('HSET', key, 'commit_seq', revision)
 redis.call('XADD', KEYS[8], revision .. '-0', 'type', 'store', 'id', id)
 redis.call('XTRIM', KEYS[8], 'MAXLEN', '~', 100000)
+redis.call('SET', KEYS[12], cjson.encode({id=id, revision=revision, digest=ARGV[12]}), 'PX', ARGV[14])
+redis.call('ZADD', KEYS[13], now + tonumber(ARGV[14]), KEYS[12])
 redis.call('DEL', KEYS[11])
 return {id, revision}
 """
@@ -89,13 +114,33 @@ return count
 _INVALIDATE = """
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return redis.error_reply('incompatible manifest') end
 if redis.call('EXISTS', KEYS[5]) == 1 then return redis.error_reply('shared generation is uncertain') end
+local prior = redis.call('GET', KEYS[6])
+if prior then
+    local receipt = cjson.decode(prior)
+    if receipt.digest ~= ARGV[5] then return redis.error_reply('operation receipt mismatch') end
+    return receipt.count
+end
 if tonumber(redis.call('GET', KEYS[2]) or '0') ~= tonumber(ARGV[2]) then return -1 end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+local expired = redis.call('ZRANGEBYSCORE', KEYS[7], '-inf', now - 1, 'LIMIT', 0, 256)
+for _, key in ipairs(expired) do
+    redis.call('DEL', key)
+    redis.call('ZREM', KEYS[7], key)
+end
+if redis.call('ZCARD', KEYS[7]) >= tonumber(ARGV[6]) then return -2 end
+if ARGV[10] ~= '' and redis.call('SISMEMBER', KEYS[9], ARGV[10]) == 0 and redis.call('SCARD', KEYS[9]) >= tonumber(ARGV[11]) then return -3 end
+if ARGV[8] ~= '' and redis.call('SISMEMBER', KEYS[8], ARGV[8]) == 0 and redis.call('SCARD', KEYS[8]) >= tonumber(ARGV[9]) then return -3 end
 redis.call('SET', KEYS[5], '1')
 local revision = redis.call('INCR', KEYS[2])
+if ARGV[10] ~= '' then redis.call('SADD', KEYS[9], ARGV[10]) end
+if ARGV[8] ~= '' then redis.call('SADD', KEYS[8], ARGV[8]) end
 redis.call('SET', ARGV[3], revision)
 redis.call('INCR', KEYS[4])
 redis.call('XADD', KEYS[3], revision .. '-0', 'type', 'invalidate')
 redis.call('XTRIM', KEYS[3], 'MAXLEN', '~', 100000)
+redis.call('SET', KEYS[6], cjson.encode({count=tonumber(ARGV[4]), digest=ARGV[5]}), 'PX', ARGV[7])
+redis.call('ZADD', KEYS[7], now + tonumber(ARGV[7]), KEYS[6])
 redis.call('DEL', KEYS[5])
 return tonumber(ARGV[4])
 """
@@ -171,6 +216,11 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         *args,
         shared_max_entries: int = 50_000,
         shared_max_leases: int = 1024,
+        shared_max_receipts: int = 100_000,
+        shared_max_partitions: int = 50_000,
+        shared_max_distinct_tags: int = 100_000,
+        shared_max_tags_per_entry: int = 64,
+        shared_max_tag_chars: int = 256,
         distributed_lease_seconds: float = 15.0,
         distributed_renew_interval_seconds: float = 5.0,
         **kwargs,
@@ -188,6 +238,13 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         self.DIRTY = self.ROOT + ":dirty"
         self._shared_max_entries = shared_max_entries
         self._shared_max_leases = shared_max_leases
+        self._shared_max_receipts = shared_max_receipts
+        self._shared_max_partitions = shared_max_partitions
+        self._shared_max_distinct_tags = shared_max_distinct_tags
+        self._shared_max_tags_per_entry = shared_max_tags_per_entry
+        self._shared_max_tag_chars = shared_max_tag_chars
+        self.RECEIPTS = self.ROOT + ":receipts"
+        self.TAGS = self.ROOT + ":tags"
         self.LEASES = self.ROOT + ":leases"
         self.LEASE_COUNTER = self.ROOT + ":lease_counter"
         self._lease_seconds = distributed_lease_seconds
@@ -208,26 +265,50 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         return f"{self.ROOT}:wm:tag:{namespace}:{hashlib.sha1(tag.encode('utf-8')).hexdigest()}"
 
     def ensure_manifest(self, manifest: dict) -> None:
-        expected = canonical(
-            {
-                **manifest,
-                "coordination": "shared-v1",
-                "max_entries": self._max_entries,
-                "shared_max_entries": self._shared_max_entries,
-                "shared_max_leases": self._shared_max_leases,
-                "lease_seconds": self._lease_seconds,
-                "renew_interval": self._renew_interval,
-            }
-        )
+        definition = {
+            **manifest,
+            "coordination": "shared-v1",
+            "max_entries": self._max_entries,
+            "shared_max_entries": self._shared_max_entries,
+            "shared_max_leases": self._shared_max_leases,
+            "shared_max_receipts": self._shared_max_receipts,
+            "shared_max_partitions": self._shared_max_partitions,
+            "shared_max_distinct_tags": self._shared_max_distinct_tags,
+            "shared_max_tags_per_entry": self._shared_max_tags_per_entry,
+            "shared_max_tag_chars": self._shared_max_tag_chars,
+            "lease_seconds": self._lease_seconds,
+            "renew_interval": self._renew_interval,
+        }
         key = self.ROOT + ":manifest"
         existing = self._client.get(key)
-        if existing is None and self._client.exists(self.ID_COUNTER, self.ALL_IDS, self.JOURNAL):
+        if existing is None and self._client.exists(
+            self.ID_COUNTER,
+            self.ALL_IDS,
+            self.JOURNAL,
+            self.EPOCH,
+            self.REVISION,
+            self.NAMESPACE_SET,
+            self.TAGS,
+            self.LEASES,
+            self.RECEIPTS,
+            self.DIRTY,
+        ):
             raise ValueError("Missing shared manifest in nonempty generation")
-        self._client.set(key, expected, nx=True)
-        if self._client.get(key) != expected:
+        if existing is None:
+            self._client.set(key, canonical({**definition, "incarnation": uuid4().hex}), nx=True)
+        actual = self._client.get(key)
+        if actual is None:
+            raise ValueError("Shared generation lost its manifest during initialization")
+        parsed = json.loads(actual)
+        incarnation = parsed.pop("incarnation", None)
+        if (
+            not isinstance(incarnation, str)
+            or len(incarnation) != 32
+            or canonical(parsed) != canonical(definition)
+        ):
             raise ValueError("Incompatible shared cache generation")
         self._client.set(self.EPOCH, 0, nx=True)
-        self._manifest = expected
+        self._manifest = actual
 
     def read_manifest(self):
         raw = self._client.get(self.ROOT + ":manifest")
@@ -240,6 +321,11 @@ class SharedRedisCacheBackend(RedisCacheBackend):
     def _healthy(self) -> None:
         if self._client.exists(self.DIRTY):
             raise ValueError("Shared generation has an uncertain mutation")
+        if (
+            self._manifest is not None
+            and self._client.get(self.ROOT + ":manifest") != self._manifest
+        ):
+            raise ValueError("Shared generation changed or lost its manifest")
 
     def events(self, start: int, end: int, limit: int = 256):
         """Return a bounded, ordered slice of authoritative mutations."""
@@ -267,7 +353,9 @@ class SharedRedisCacheBackend(RedisCacheBackend):
             raise ValueError("Shared manifest was not initialized")
         if expected_epoch is None:
             expected_epoch = self.epoch()
-        encoded_tags = json.dumps([self._tag_key(entry.namespace, tag) for tag in entry.tags or []])
+        encoded_tags = json.dumps(
+            list(dict.fromkeys(self._tag_key(entry.namespace, tag) for tag in entry.tags or []))
+        )
         data = {
             "namespace": entry.namespace,
             "query": entry.query,
@@ -283,34 +371,59 @@ class SharedRedisCacheBackend(RedisCacheBackend):
             "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
         }
         ttl_ms = max(1, int((entry.expires_at - time.time()) * 1000)) if entry.expires_at else 0
-        result = self._client.eval(
-            _STORE,
-            11,
-            self.ROOT + ":manifest",
-            self.EPOCH,
-            self.ID_COUNTER,
-            self._namespace_key(entry.namespace),
-            self.NAMESPACE_SET,
-            self.ALL_IDS,
-            self.REVISION,
-            self.JOURNAL,
-            self.ROOT + ":entry_partition",
-            self.ROOT + ":entry_tags",
-            self.DIRTY,
-            self._manifest,
-            str(expected_epoch),
-            self.KEY_PREFIX,
-            json.dumps(data, allow_nan=False),
-            entry.namespace,
-            encoded_tags,
-            ttl_ms,
-            self._max_entries,
-            self._shared_max_entries,
-            lease_key,
-            lease_token,
-        )
+        payload = json.dumps(data, sort_keys=True, allow_nan=False)
+        receipt_key = self.ROOT + ":receipt:" + uuid4().hex
+        payload_digest = hashlib.sha256(payload.encode()).hexdigest()
+
+        def commit():
+            return self._client.eval(
+                _STORE,
+                14,
+                self.ROOT + ":manifest",
+                self.EPOCH,
+                self.ID_COUNTER,
+                self._namespace_key(entry.namespace),
+                self.NAMESPACE_SET,
+                self.ALL_IDS,
+                self.REVISION,
+                self.JOURNAL,
+                self.ROOT + ":entry_partition",
+                self.ROOT + ":entry_tags",
+                self.DIRTY,
+                receipt_key,
+                self.RECEIPTS,
+                self.TAGS,
+                self._manifest,
+                str(expected_epoch),
+                self.KEY_PREFIX,
+                payload,
+                entry.namespace,
+                encoded_tags,
+                ttl_ms,
+                self._max_entries,
+                self._shared_max_entries,
+                lease_key,
+                lease_token,
+                payload_digest,
+                self._shared_max_receipts,
+                60_000,
+                self._shared_max_partitions,
+                self._shared_max_distinct_tags,
+            )
+
+        import redis
+
+        try:
+            result = commit()
+        except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError):
+            try:
+                result = commit()
+            except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as exc:
+                raise CacheOperationError("store_indeterminate") from exc
         if isinstance(result, list):
             return int(result[0]), int(result[1])
+        if int(result) == -2:
+            return -1, None
         return int(result), None
 
     def acquire_flight(self, exact_key: str, ttl_ms: int) -> tuple[str, str | None]:
@@ -452,25 +565,56 @@ class SharedRedisCacheBackend(RedisCacheBackend):
             if cursor == 0:
                 return count
 
-    def _invalidate(self, membership: str, watermark: str) -> int:
+    def _invalidate(
+        self, membership: str, watermark: str, *, partition: str = "", tag_key: str = ""
+    ) -> int:
+        import redis
+
         for _ in range(5):
             before = self.revision()
             count = self._count_live(membership)
-            result = int(
-                self._client.eval(
+            receipt_key = self.ROOT + ":receipt:" + uuid4().hex
+            payload_digest = hashlib.sha256(
+                f"{membership}:{watermark}:{before}:{count}".encode()
+            ).hexdigest()
+
+            def commit():
+                return self._client.eval(
                     _INVALIDATE,
-                    5,
+                    9,
                     self.ROOT + ":manifest",
                     self.REVISION,
                     self.JOURNAL,
                     self.EPOCH,
                     self.DIRTY,
+                    receipt_key,
+                    self.RECEIPTS,
+                    self.TAGS,
+                    self.NAMESPACE_SET,
                     self._manifest,
                     before,
                     watermark,
                     count,
+                    payload_digest,
+                    self._shared_max_receipts,
+                    60_000,
+                    tag_key,
+                    self._shared_max_distinct_tags,
+                    partition,
+                    self._shared_max_partitions,
                 )
-            )
+
+            try:
+                result = int(commit())
+            except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError):
+                try:
+                    result = int(commit())
+                except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as exc:
+                    raise CacheOperationError("invalidation_indeterminate") from exc
+            if result == -2:
+                raise CacheOperationError("receipt_capacity")
+            if result == -3:
+                raise CacheOperationError("metadata_capacity")
             if result >= 0:
                 return result
         raise CacheOperationError("invalidation_conflict")
@@ -480,11 +624,16 @@ class SharedRedisCacheBackend(RedisCacheBackend):
 
     def delete_namespace(self, namespace: str) -> int:
         return self._invalidate(
-            self._namespace_key(namespace), self._namespace_watermark(namespace)
+            self._namespace_key(namespace),
+            self._namespace_watermark(namespace),
+            partition=namespace,
         )
 
     def delete_by_tag(self, tag: str, namespace: str) -> int:
-        return self._invalidate(self._tag_key(namespace, tag), self._tag_watermark(namespace, tag))
+        tag_key = self._tag_key(namespace, tag)
+        return self._invalidate(
+            tag_key, self._tag_watermark(namespace, tag), partition=namespace, tag_key=tag_key
+        )
 
     def clear(self) -> int:
         if self._manifest is None:

@@ -123,6 +123,11 @@ class LongCache:
                     timeout=c.backend_timeout_seconds,
                     shared_max_entries=c.shared_max_entries,
                     shared_max_leases=c.shared_max_leases,
+                    shared_max_receipts=c.shared_max_receipts,
+                    shared_max_partitions=c.shared_max_partitions,
+                    shared_max_distinct_tags=c.shared_max_distinct_tags,
+                    shared_max_tags_per_entry=c.shared_max_tags_per_entry,
+                    shared_max_tag_chars=c.shared_max_tag_chars,
                     distributed_lease_seconds=c.distributed_lease_seconds,
                     distributed_renew_interval_seconds=c.distributed_renew_interval_seconds,
                 )
@@ -549,6 +554,12 @@ class LongCache:
             not isinstance(tags, (list, tuple)) or not all(type(t) is str for t in tags)
         ):
             raise ValueError("Tags must be strings")
+        if self.config.deployment_mode == "shared" and tags is not None:
+            if len(tags) > self.config.shared_max_tags_per_entry or any(
+                len(tag) > self.config.shared_max_tag_chars for tag in tags
+            ):
+                return StoreDecision("REJECTED", "tag_capacity")
+            tags = tuple(dict.fromkeys(tags))
         vector = self._dependency("embedding", self._embedding.embed, query)
         now = time.time()
         entry = CacheEntry(

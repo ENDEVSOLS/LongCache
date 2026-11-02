@@ -52,6 +52,11 @@ class CacheConfig:
     shared_sync_timeout_seconds: float = 5.0
     shared_max_entries: int = 50_000
     shared_max_leases: int = 1024
+    shared_max_receipts: int = 100_000
+    shared_max_partitions: int = 50_000
+    shared_max_distinct_tags: int = 100_000
+    shared_max_tags_per_entry: int = 64
+    shared_max_tag_chars: int = 256
     distributed_lease_seconds: float = 15.0
     distributed_renew_interval_seconds: float = 5.0
     faiss_index_type: str = "flat"
@@ -101,6 +106,16 @@ class CacheConfig:
             raise ValueError("shared_max_entries must be a positive integer")
         if type(self.shared_max_leases) is not int or self.shared_max_leases < 1:
             raise ValueError("shared_max_leases must be a positive integer")
+        if type(self.shared_max_receipts) is not int or self.shared_max_receipts < 1:
+            raise ValueError("shared_max_receipts must be a positive integer")
+        for name in (
+            "shared_max_partitions",
+            "shared_max_distinct_tags",
+            "shared_max_tags_per_entry",
+            "shared_max_tag_chars",
+        ):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f"{name} must be a positive integer")
         if self.distributed_renew_interval_seconds > self.distributed_lease_seconds / 3:
             raise ValueError("Lease renewal interval must be at most one-third of its lifetime")
         if not 0.1 <= self.distributed_lease_seconds <= 300:

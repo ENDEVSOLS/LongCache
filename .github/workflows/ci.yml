@@ -68,9 +68,9 @@ jobs:
         run: |
           uv run --no-sync pytest tests/ -v --tb=short -rs --junitxml=evaluation/reports/pytest-ci.xml --cov=src/longcache --cov-report=term-missing
 
-      - name: Evaluate changing-document RAG workflow
+      - name: Evaluate changing-document RAG across all backends
         if: matrix.python-version == '3.12'
-        run: uv run --no-sync python -m evaluation.rag --output evaluation/reports/v0_3_rag.json
+        run: uv run --no-sync python -m evaluation.rag --output evaluation/reports/v0_4_rag.json
 
       - name: Run two-instance shared Redis example
         if: matrix.python-version == '3.12'
@@ -99,7 +99,7 @@ jobs:
           name: acceptance-${{ matrix.python-version }}
           path: |
             evaluation/reports/pytest-ci.xml
-            evaluation/reports/v0_3_rag.json
+            evaluation/reports/v0_4_rag.json
             evaluation/reports/v0_4_deployment-smoke.json
 
   model-evaluation:
