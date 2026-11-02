@@ -48,6 +48,17 @@ class CacheConfig:
     cache_error_policy: str = "raise"
     backend_timeout_seconds: float = 2.0
     shutdown_timeout_seconds: float = 5.0
+    deployment_mode: str = "single_process"
+    shared_sync_timeout_seconds: float = 5.0
+    shared_max_entries: int = 50_000
+    shared_max_leases: int = 1024
+    shared_max_receipts: int = 100_000
+    shared_max_partitions: int = 50_000
+    shared_max_distinct_tags: int = 100_000
+    shared_max_tags_per_entry: int = 64
+    shared_max_tag_chars: int = 256
+    distributed_lease_seconds: float = 15.0
+    distributed_renew_interval_seconds: float = 5.0
     faiss_index_type: str = "flat"
     hnsw_m: int = 32
     hnsw_ef_search: int = 64
@@ -78,12 +89,39 @@ class CacheConfig:
             "singleflight_wait_timeout_seconds",
             "backend_timeout_seconds",
             "shutdown_timeout_seconds",
+            "shared_sync_timeout_seconds",
+            "distributed_lease_seconds",
+            "distributed_renew_interval_seconds",
         ):
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be positive and finite")
         if self.cache_error_policy not in ("raise", "bypass"):
             raise ValueError("Invalid cache_error_policy")
+        if self.deployment_mode not in ("single_process", "shared"):
+            raise ValueError("Invalid deployment_mode")
+        if self.deployment_mode == "shared" and self.backend != "redis":
+            raise ValueError("Shared deployment requires the Redis backend")
+        if type(self.shared_max_entries) is not int or self.shared_max_entries < 1:
+            raise ValueError("shared_max_entries must be a positive integer")
+        if type(self.shared_max_leases) is not int or self.shared_max_leases < 1:
+            raise ValueError("shared_max_leases must be a positive integer")
+        if type(self.shared_max_receipts) is not int or self.shared_max_receipts < 1:
+            raise ValueError("shared_max_receipts must be a positive integer")
+        for name in (
+            "shared_max_partitions",
+            "shared_max_distinct_tags",
+            "shared_max_tags_per_entry",
+            "shared_max_tag_chars",
+        ):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.distributed_renew_interval_seconds > self.distributed_lease_seconds / 3:
+            raise ValueError("Lease renewal interval must be at most one-third of its lifetime")
+        if not 0.1 <= self.distributed_lease_seconds <= 300:
+            raise ValueError("Distributed lease lifetime must be between 0.1 and 300 seconds")
+        if self.distributed_renew_interval_seconds < 0.01:
+            raise ValueError("Distributed renewal interval must be at least 0.01 seconds")
 
         if self.scope_policy not in ("private", "tenant_shared", "public"):
             raise ValueError("Invalid scope_policy")

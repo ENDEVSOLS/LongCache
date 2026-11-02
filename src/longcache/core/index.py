@@ -47,6 +47,7 @@ class SimilarityIndex:
         self._async_lock: Optional[asyncio.Lock] = None
         self._faiss_index = None
         self._id_map: dict[int, int] = {}  # faiss_internal_id -> entry_id
+        self._entry_ids: set[int] = set()
         self._next_faiss_id = 0
         self._dimension = None
         self._orphan_count = 0  # vectors in FAISS with no id_map entry
@@ -97,6 +98,8 @@ class SimilarityIndex:
             entry_id: The database ID of the corresponding CacheEntry.
         """
         with self._lock:
+            if entry_id in self._entry_ids:
+                return
             if self._faiss_index is None:
                 self._ensure_index(vector.shape[0])
             elif vector.shape != (self._dimension,):
@@ -107,6 +110,7 @@ class SimilarityIndex:
             faiss_id = self._next_faiss_id
             self._faiss_index.add(vector_2d)
             self._id_map[faiss_id] = entry_id
+            self._entry_ids.add(entry_id)
             self._next_faiss_id += 1
 
     async def async_add(self, vector: np.ndarray, entry_id: int) -> None:
@@ -214,6 +218,7 @@ class SimilarityIndex:
         with self._lock:
             if faiss_id in self._id_map:
                 entry_id = self._id_map.pop(faiss_id)
+                self._entry_ids.discard(entry_id)
                 self._removed_entry_ids.add(entry_id)
                 self._orphan_count += 1
                 self._auto_rebuild_if_needed()
@@ -252,6 +257,7 @@ class SimilarityIndex:
             if not valid_entries:
                 self._faiss_index = None
                 self._id_map = {}
+                self._entry_ids = set()
                 self._next_faiss_id = 0
                 self._orphan_count = 0
                 self._removed_entry_ids.clear()
@@ -267,6 +273,7 @@ class SimilarityIndex:
             replacement.add(vectors_array)
             self._faiss_index = replacement
             self._id_map = {i: entry.id for i, entry in enumerate(valid_entries)}
+            self._entry_ids = {entry.id for entry in valid_entries}
             self._next_faiss_id = len(valid_entries)
             self._dimension = dimension
 

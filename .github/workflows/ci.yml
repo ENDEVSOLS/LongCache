@@ -27,7 +27,7 @@ jobs:
         python-version: ["3.11", "3.12"]
     services:
       redis:
-        image: redis:7
+        image: redis:7.2-alpine
         ports:
           - 16379:6379
         options: >-
@@ -68,9 +68,20 @@ jobs:
         run: |
           uv run --no-sync pytest tests/ -v --tb=short -rs --junitxml=evaluation/reports/pytest-ci.xml --cov=src/longcache --cov-report=term-missing
 
-      - name: Evaluate changing-document RAG workflow
+      - name: Evaluate changing-document RAG across all backends
         if: matrix.python-version == '3.12'
-        run: uv run --no-sync python -m evaluation.rag --output evaluation/reports/v0_3_rag.json
+        run: uv run --no-sync python -m evaluation.rag --output evaluation/reports/v0_4_rag.json
+
+      - name: Run two-instance shared Redis example
+        if: matrix.python-version == '3.12'
+        run: uv run --no-sync python examples/multi_instance_rag.py
+
+      - name: Smoke deployment benchmark against actual v0.3 source
+        if: matrix.python-version == '3.12'
+        run: |
+          mkdir -p /tmp/longcache-v03-baseline
+          git archive e384615 | tar -x -C /tmp/longcache-v03-baseline
+          uv run --no-sync python -m evaluation.deployment --baseline-root /tmp/longcache-v03-baseline --smoke
 
       - name: Run offline public-interface example
         run: uv run --no-sync python examples/safe_reuse.py
@@ -88,7 +99,8 @@ jobs:
           name: acceptance-${{ matrix.python-version }}
           path: |
             evaluation/reports/pytest-ci.xml
-            evaluation/reports/v0_3_rag.json
+            evaluation/reports/v0_4_rag.json
+            evaluation/reports/v0_4_deployment-smoke.json
 
   model-evaluation:
     timeout-minutes: 30
@@ -127,6 +139,18 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: [lint, test, model-evaluation]
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 16379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      LONGCACHE_TEST_REDIS_URL: redis://localhost:16379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -150,8 +174,10 @@ jobs:
             uv venv "/tmp/wheel-check-$python_version" --python "$python_version"
             wheel_python="/tmp/wheel-check-$python_version/bin/python"
             uv pip install --python "$wheel_python" "torch==2.14.0+cpu" --index-url https://download.pytorch.org/whl/cpu
-            uv pip install --python "$wheel_python" dist/*.whl
+            wheel_path=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+            uv pip install --python "$wheel_python" "${wheel_path}[redis]"
             PYTHONPATH= "$wheel_python" scripts/wheel_smoke_v3.py
+            PYTHONPATH= "$wheel_python" scripts/wheel_smoke_shared_v4.py
             "/tmp/wheel-check-$python_version/bin/longcache" --version
           done
       - name: Verify Python 3.10 rejection

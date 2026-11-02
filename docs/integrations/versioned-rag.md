@@ -53,4 +53,10 @@ export LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0
 uv run --no-sync python -m evaluation.rag
 ```
 
-A disposable Redis service and the pinned model weights are required. The recorded run passed all six backend/index combinations. This verifies application integration and freshness with authored documents and extractive answers. Customer-domain representativeness and live-provider answer quality still require separate evaluation. See [benchmarks](../benchmarks.md) and [acceptance evidence](../plans/v0.2.0-acceptance.md).
+A disposable Redis service and the pinned model weights are required. The recorded run passed all eight backend/index combinations: single-process memory, SQLite, and Redis (Flat and HNSW), plus multi-instance shared Redis (Flat and HNSW). This verifies application integration and freshness with authored documents and extractive answers.
+
+For a runnable two-instance shared Redis demonstration, run:
+```bash
+LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run python examples/multi_instance_rag.py
+```
+See [shared Redis deployment](../deployment.md) for multi-process freshness guarantees, [benchmarks](../benchmarks.md), and [acceptance evidence](../plans/v0.4.0-acceptance.md).

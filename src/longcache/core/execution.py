@@ -30,6 +30,7 @@ class Start:
     flight: Flight | None
     leader: bool
     epoch: int
+    shared_epoch: int | None = None
     reason: str | None = None
     detached: bool = False
     _detach_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -81,8 +82,13 @@ class Execution:
             return await self.astart(query, context, namespace, ttl, tags)
         prepared, reason = cache._prepare(query, context, namespace, {}, _initialize=False)
         if prepared is None:
-            return Start(None, None, None, False, cache._epoch, reason)
+            return Start(None, None, None, False, cache._epoch, reason=reason)
         ctx = prepared[0]
+        shared_epoch = (
+            cache._dependency("backend", cache.backend.epoch)
+            if cache.config.deployment_mode == "shared"
+            else None
+        )
         exact = ctx.exact_key(
             query,
             namespace if namespace is not None else cache.config.namespace,
@@ -96,7 +102,9 @@ class Execution:
         if key in self._owned.get():
             raise SingleflightReentrancyError("Execution cannot wait on its own key")
         flight, leader = self.registry.claim(key)
-        state = Start(prepared, LookupDecision("MISS", "no_candidate"), flight, leader, epoch)
+        state = Start(
+            prepared, LookupDecision("MISS", "no_candidate"), flight, leader, epoch, shared_epoch
+        )
         cache._observability.count("singleflight", role=state.role)
         if leader:
             owner = self._owned.set((*self._owned.get(), key))
@@ -118,10 +126,15 @@ class Execution:
                 raise
             prepared, reason = None, "cache_unavailable"
         if prepared is None:
-            return Start(None, None, None, False, cache._epoch, reason)
+            return Start(None, None, None, False, cache._epoch, reason=reason)
         ctx = prepared[0]
+        shared_epoch = (
+            cache._dependency("backend", cache.backend.epoch)
+            if cache.config.deployment_mode == "shared"
+            else None
+        )
         decision = self.lookup(query, ctx, namespace)
-        state = Start(prepared, decision, None, True, cache._epoch)
+        state = Start(prepared, decision, None, True, cache._epoch, shared_epoch)
         if decision.outcome == "HIT":
             return state
         if cache.config.singleflight_enabled:
@@ -208,11 +221,29 @@ class Execution:
                 raise SingleflightInvalidatedError(
                     "Shared response was invalidated before delivery"
                 )
+            if source in ("cache", "coalesced") and cache.config.deployment_mode == "shared":
+                if decision is None or decision._shared_epoch is None:
+                    raise SingleflightInvalidatedError("Shared response has no publication fence")
+                current_epoch = cache._dependency("backend", cache.backend.epoch)
+                if current_epoch != decision._shared_epoch:
+                    raise SingleflightInvalidatedError("Shared response was invalidated")
+                if decision.entry_id is not None:
+                    current = cache._dependency(
+                        "backend", cache.backend.retrieve, decision.entry_id
+                    )
+                    if current is None or not cache._dependency(
+                        "backend",
+                        cache.backend.validate_hit,
+                        current,
+                        expected_epoch=current_epoch,
+                    ):
+                        raise SingleflightInvalidatedError("Shared response was invalidated")
             if (
                 source in ("cache", "coalesced")
                 and decision is not None
                 and decision._expires_at is not None
                 and time.time() >= decision._expires_at
+                and cache.config.deployment_mode != "shared"
             ):
                 raise SingleflightInvalidatedError("Shared response expired before delivery")
             if prepared is not None:
@@ -274,11 +305,13 @@ class Execution:
             raise SingleflightLeaderError(
                 "Shared execution failed or its leader was cancelled"
             ) from completion.error
+        cache = self.cache
         if completion.kind != "value" or (
-            completion.expires_at is not None and time.time() >= completion.expires_at
+            cache.config.deployment_mode != "shared"
+            and completion.expires_at is not None
+            and time.time() >= completion.expires_at
         ):
             return None, False, None
-        cache = self.cache
         response = decode_response(json.loads(completion.payload), context.codec)
         payload, admission = cache._dependency("admission", admit, response, context, cache._admit)
         if admission.action != "accept":
@@ -290,7 +323,9 @@ class Execution:
             "verification", outcome=verification.action, reason=verification.reason
         )
         if verification.action != "accept" or (
-            completion.expires_at is not None and time.time() >= completion.expires_at
+            cache.config.deployment_mode != "shared"
+            and completion.expires_at is not None
+            and time.time() >= completion.expires_at
         ):
             return None, False, None
         decision = LookupDecision(
@@ -326,6 +361,16 @@ class Execution:
                         )
                     except (ValueError, TypeError):
                         valid = False
+                    if valid and cache.config.deployment_mode == "shared":
+                        shared_epoch = cache._dependency("backend", cache.backend.epoch)
+                        valid = cache._dependency(
+                            "backend",
+                            cache.backend.validate_hit,
+                            entry,
+                            expected_epoch=shared_epoch,
+                        )
+                    else:
+                        shared_epoch = None
                     if valid:
                         decision = LookupDecision(
                             "HIT",
@@ -334,7 +379,10 @@ class Execution:
                             entry_id=entry.id,
                             _epoch=cache._epoch,
                             _expires_at=entry.expires_at,
+                            _shared_epoch=shared_epoch,
                         )
+        if cache.config.deployment_mode == "shared" and decision.entry_id is None:
+            return None, False, None
         return response, True, decision
 
     def publish(self, flight, result, context, epoch, expires_at=None, entry_id=None):
@@ -389,13 +437,14 @@ class Execution:
             ttl=ttl,
             tags=tags,
             _expected_epoch=state.epoch,
+            _expected_shared_epoch=state.shared_epoch,
             _internal=True,
             _cancel=_cancel,
         )
         if state.flight is not None and state.leader:
-            if stored.outcome == "REJECTED" and stored.reason not in (
-                "cache_unavailable",
-                "invalidated",
+            if stored.outcome == "REJECTED" and (
+                cache.config.deployment_mode == "shared"
+                or stored.reason not in ("cache_unavailable", "invalidated")
             ):
                 self.registry.complete(state.flight, Completion("non_shareable"))
             else:

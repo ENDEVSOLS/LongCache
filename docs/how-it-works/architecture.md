@@ -36,8 +36,11 @@ Provider failures propagate without hidden retries. Rejected or oversized result
 are not shared; followers execute their own callbacks once.
 
 Separate manual lookup → origin → store calls and generic downstream ASGI invocations
-do not receive singleflight automatically. Multiple instances/processes do not share
-flights or synchronize their local FAISS indexes, even with Redis persistence.
+do not receive singleflight automatically. In the default single-process mode, multiple
+instances/processes do not share flights or synchronize their local FAISS indexes. In v0.4
+opt-in shared Redis mode (`deployment_mode="shared"`), distributed singleflight leases
+coalesce identical requests across processes, and an authoritative mutation journal
+synchronizes local FAISS indexes with atomic replay guards; see [shared Redis deployment](../deployment.md).
 
 ## Failure, invalidation, and resources
 

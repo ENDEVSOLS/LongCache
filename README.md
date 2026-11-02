@@ -23,6 +23,7 @@
 
 **LongCache** reuses stored responses when trusted scope, execution context, response admission, and verification permit reuse. Python 3.11 and 3.12 are tested; v0.1.1 remains the Python 3.10-compatible line. Measure response quality, latency, and savings on your own workload.
 
+
 ---
 
 ## Why LongCache?
@@ -57,12 +58,12 @@ uv pip install longcache[redis]
 uv pip install longcache[all]
 ```
 
-To try  v0.3.0, check out the v0.3 development branch and install from
-the repository directory containing `pyproject.toml`:
+To try the development line (v0.4 features on the `0.3.0` package version), check out
+the development branch and install from the repository directory containing `pyproject.toml`:
 
 ```bash
 uv pip install -e "."
-# Include extras as needed, for example: uv pip install -e ".[openai,redis]"
+# Shared Redis mode needs the Redis extra: uv pip install -e ".[redis]"
 ```
 
 > **Offline-friendly**: LongCache embeds queries locally. After the BGE-small model weights are downloaded on first run, no internet connection is required.
@@ -185,6 +186,7 @@ config = CacheConfig(
     cache_error_policy="raise",  # "bypass" permits safe origin execution on runtime cache failures
     backend_timeout_seconds=2.0,  # Per-I/O timeout
     shutdown_timeout_seconds=5.0,  # Shutdown grace period
+    deployment_mode="single_process",  # "shared" = v0.4 multi-instance Redis (opt-in)
     faiss_index_type="flat",  # "flat" (exact) | "hnsw" (approximate, faster at scale)
     hnsw_m=32,  # HNSW connections per node
     hnsw_ef_search=64,  # HNSW search depth
@@ -268,7 +270,8 @@ cache = LongCache(config, context=context)
 ### Integrations & Backends
 
 - ✅ **SQLite Backend:** No external service, WAL mode, versioned manifests, transactional initialization; default backend
-- ✅ **Redis Backend:** Versioned durable response storage with TTL; one LongCache process per generation
+- ✅ **Redis Backend:** Versioned durable response storage with TTL; one LongCache process per generation in default mode
+- 🧪 **Shared Redis Mode (v0.4, opt-in):** Journal-synchronized local indexes, guarded replay, and distributed singleflight across processes; under qualification
 - ✅ **Async Redis Backend:** Experimental standalone storage interface; unsupported through `LongCache`
 - ✅ **In-Memory Backend:** Zero I/O, ideal for unit tests and CI/CD pipelines
 - ✅ **LangChain Integration:** `CachedLLM` and `CachedChain` compatibility wrappers; pass-through in v0.3
@@ -299,12 +302,14 @@ cache = LongCache(
 | **Cons**     | Single-machine only                                                                            |
 | **Best for** | Development, single-process applications, CLI tools                                            |
 
-### Redis (Shared Storage)
+### Redis (Durable & Multi-Instance Shared Storage)
 
 ```bash
 uv pip install longcache[redis]
 ```
 
+#### Single-Process Mode (Default)
+In default single-process mode, Redis persists responses and TTLs while each process maintains an independent local FAISS index:
 ```python
 cache = LongCache(
     CacheConfig(
@@ -315,11 +320,37 @@ cache = LongCache(
 )
 ```
 
-|                    |                                                                                                                |
-| ------------------ | -------------------------------------------------------------------------------------------------------------- |
-| **Pros**     | Shared response storage and Redis key expiry                                                                   |
-| **Cons**     | Requires Redis; each LongCache process keeps its own FAISS index, so cross-process writes are not synchronized |
-| **Best for** | A single cache process using Redis for durable response storage                                                |
+#### Shared Mode (v0.4 development, opt-in)
+
+Multiple processes connect to one writable Redis authority. Redis owns entries, an ordered mutation journal, invalidation watermarks, and request leases; each process keeps its own FAISS index and catches up before each lookup.
+
+```python
+config = CacheConfig(
+    backend="redis",
+    deployment_mode="shared",
+    redis_url="redis://localhost:6379/0",
+    cache_id="support",
+    generation="shared-v1",  # fresh generation; never reuse a v2 keyspace
+    embedder_revision="<immutable-model-revision>",
+)
+
+with LongCache(config, context=context) as cache:
+    answer = cache.get_or_compute(
+        query,
+        lambda: generate_from_snapshot(snapshot),
+        tags=("doc-id",),
+    )
+```
+
+|              | Single-process mode (default)                         | Shared mode (`deployment_mode="shared"`)                                                   |
+| ------------ | ----------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| **Keyspace** | `longcache:v2:<cache_id>:<generation>`                | `longcache:shared-v1:<cache_id>:<generation>`                                              |
+| **Index**    | Local FAISS; not synchronized with other processes    | Local FAISS synchronized via Redis journal; journal gaps trigger a rebuild                  |
+| **Coalescing** | Within one process                                  | Across processes via fenced leases (15 s lifetime, 5 s renewal by default)                  |
+| **Requires** | Redis                                                 | Dedicated non-evicting Redis; identical cache ID, generation, embedder, and policy settings |
+| **Status**   | Supported                                             | Development; release qualification open                                                     |
+
+Shared-mode limits: one Redis authority only. Redis Cluster, Sentinel, failover, and replica reads are out of scope. After a Redis restart or restore, stop all workers, choose a new generation, and run a canary. Callbacks must be safe to repeat, because after a lease expires a new owner may run the origin again. Manual lookup → generate → store calls are not coalesced. Full contract: [shared Redis deployment](docs/deployment.md).
 
 ### Async Redis backend status
 
@@ -608,11 +639,22 @@ Process hit/miss counters reset on restart; stored entry hit counts persist. Sco
 | `cache_error_policy`                | `str`   | `"raise"`                    | `"raise"` or opt-in `"bypass"` for recognized runtime cache failures            |
 | `backend_timeout_seconds`           | `float` | `2.0`                        | SQLite busy / Redis connect and socket deadlines per I/O                            |
 | `shutdown_timeout_seconds`          | `float` | `5.0`                        | Default shutdown grace period                                                       |
+| `deployment_mode`                   | `str`   | `"single_process"`           | `"shared"` enables v0.4 multi-instance Redis mode (requires `backend="redis"`)     |
+| `shared_sync_timeout_seconds`       | `float` | `5.0`                        | Deadline for index catch-up before a shared lookup                                  |
+| `shared_max_entries`                | `int`   | `50_000`                     | Live entries per shared generation                                                  |
+| `shared_max_leases`                 | `int`   | `1024`                       | Active distributed leases per generation                                            |
+| `shared_max_receipts`               | `int`   | `100_000`                    | Retained operation receipts for lost-response resolution                            |
+| `shared_max_partitions`             | `int`   | `50_000`                     | Distinct semantic partitions per generation                                         |
+| `shared_max_distinct_tags`          | `int`   | `100_000`                    | Distinct tags per generation                                                        |
+| `shared_max_tags_per_entry`         | `int`   | `64`                         | Tags per stored entry                                                               |
+| `shared_max_tag_chars`              | `int`   | `256`                        | Maximum tag length                                                                  |
+| `distributed_lease_seconds`         | `float` | `15.0`                       | Lease lifetime (0.1–300 s)                                                          |
+| `distributed_renew_interval_seconds`| `float` | `5.0`                        | Renewal interval; at most one-third of the lease lifetime                           |
 | `faiss_index_type`                  | `str`   | `"flat"`                     | `"flat"` (exact) or `"hnsw"` (approximate)                                      |
 | `hnsw_m`                            | `int`   | `32`                         | HNSW connections per node (higher = more accurate, more memory)                     |
 | `hnsw_ef_search`                    | `int`   | `64`                         | HNSW search depth (higher = more accurate, slower)                                  |
 | `scope_policy`                      | `str`   | `"private"`                  | Trusted tenant/user scope; `tenant_shared` and `public` require explicit opt-in |
-| `cache_id`, `generation`          | `str`   | `"default"`                  | Owned Redis keyspace and storage generation                                         |
+| `cache_id`, `generation`          | `str`   | `"default"`                  | Owned Redis keyspace and storage generation (shared limits are bound to it)         |
 | `verification_budget`               | `int`   | `8`                          | Maximum candidates checked per lookup                                               |
 | `model`                             | `str`   | `""`                         | Legacy execution field; does not replace trusted context                            |
 | `system_prompt`                     | `str`   | `""`                         | Global system prompt for composite key scoping                                      |
@@ -740,6 +782,7 @@ src/longcache/
 │   ├── policy.py            # Admission, verification, and response codecs
 │   ├── execution.py         # Shared sync/async execution protocol
 │   ├── singleflight.py      # Bounded flights and detachable async waits
+│   ├── distributed_singleflight.py # v0.4 fenced Redis leases, renewal, remote followers
 │   ├── lifecycle.py         # Worker ownership, cancellation, and cleanup
 │   ├── reliability.py       # Runtime error policy and decision accounting
 │   ├── observability.py     # Redacted events and bounded measurements
@@ -749,6 +792,7 @@ src/longcache/
 │   ├── base.py              # AbstractCacheBackend ABC
 │   ├── sqlite.py            # SQLiteCacheBackend — owned connection, WAL, format-2 metadata
 │   ├── redis.py             # RedisCacheBackend — sync, tag support, atomic TTL
+│   ├── redis_shared.py      # v0.4 shared keyspace, journal, watermarks, guarded Lua mutations
 │   ├── async_redis.py       # AsyncRedisCacheBackend — standalone experimental adapter
 │   └── memory.py            # InMemoryCacheBackend — testing, zero I/O
 └── integrations/
@@ -775,7 +819,7 @@ LongCache uses **BAAI/bge-small-en-v1.5** by default:
 | `IndexFlatIP`   | `"flat"`   | Exact search; measure latency and memory at your cache size              |
 | `IndexHNSWFlat` | `"hnsw"`   | Approximate search; measure recall, latency, and memory on your workload |
 
-After TTL sweeps, namespace invalidations, or evictions, the local FAISS index is rebuilt from live backend entries. Redis storage alone does not synchronize indexes between processes.
+After TTL sweeps, namespace invalidations, or evictions, the local FAISS index is rebuilt from live backend entries. In single-process mode, Redis storage does not synchronize indexes between processes. In shared mode, each process applies journal events before lookup and rebuilds from authoritative Redis state on a gap; stale vectors are rejected by the Redis replay guard and compacted in the background.
 
 ### Thread Safety
 
@@ -799,6 +843,8 @@ Stored entry hit counts persist; process-level hit/miss counters reset on restar
 
 Cache hit rate and savings vary with traffic, threshold, embedding model, and safety rules. Benchmark your own workload. Record hit rate, incorrect-hit rate, bypass rate, p50/p95/p99 latency, and actual provider usage before claiming cost savings.
 
+The v0.4 deployment runner (`python -m evaluation.deployment`) compares archived v0.3 source, the current single-process path, and two shared processes against one Redis service. Development-host results and their limits are in the [benchmarks guide](docs/benchmarks.md) and the [v0.4 execution record](docs/plans/v0.4.0-execution.md). They are not production SLAs.
+
 ---
 
 ## Project Structure
@@ -818,12 +864,16 @@ longcache/
 │       │   ├── entry.py
 │       │   ├── embedder.py
 │       │   ├── index.py
+│       │   ├── execution.py
+│       │   ├── singleflight.py
+│       │   ├── distributed_singleflight.py
 │       │   └── cache.py
 │       ├── backends/
 │       │   ├── __init__.py
 │       │   ├── base.py
 │       │   ├── sqlite.py
 │       │   ├── redis.py
+│       │   ├── redis_shared.py
 │       │   ├── async_redis.py
 │       │   └── memory.py
 │       └── integrations/
@@ -840,11 +890,17 @@ longcache/
 │   ├── test_backends.py
 │   ├── test_langchain.py
 │   ├── test_middleware.py
-│   └── test_cli.py
+│   ├── test_cli.py
+│   └── test_shared_redis_v4.py   # two-process shared Redis acceptance
+├── evaluation/
+│   ├── run.py, rag.py, deployment.py
+│   └── configs/
 └── examples/
     ├── basic_langchain.py
     ├── fastapi_middleware.py
-    └── redis_production.py
+    ├── redis_production.py
+    ├── versioned_rag.py
+    └── multi_instance_rag.py      # two-instance shared Redis freshness demo
 ```
 
 ---
@@ -914,6 +970,13 @@ test Redis instance and available BGE-small model weights:
 ```bash
 LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 LONGCACHE_TEST_MODEL=1 \
     uv run --no-sync pytest -q -rs
+```
+
+Shared Redis tests are skipped unless `LONGCACHE_TEST_REDIS_URL` points at a disposable Redis 7.2 service. They own only test-prefixed keys and never flush the database:
+
+```bash
+LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run --no-sync pytest tests/test_shared_redis_v4.py -q -rs
+LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run --no-sync python examples/multi_instance_rag.py
 ```
 
 ---

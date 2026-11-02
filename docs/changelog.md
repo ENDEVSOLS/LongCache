@@ -2,6 +2,11 @@
 
 All notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — v0.4 development
+
+- Opt-in shared Redis keyspace, revision-aware local indexes, authoritative replay guards, scoped invalidation fences, and distributed exact-request leases.
+- Two-instance RAG example and development evidence. See [the v0.4 execution record](plans/v0.4.0-execution.md) for passing checks and remaining release gates.
+
 ## [0.3.0] - Unreleased
 
 ### Added

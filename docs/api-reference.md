@@ -55,6 +55,13 @@
 | `singleflight_max_inflight`, `singleflight_max_waiters_per_key` | `1024`, `256` |
 | `cache_error_policy` | `raise` (`bypass` is opt-in) |
 | `backend_timeout_seconds`, `shutdown_timeout_seconds` | `2.0`, `5.0` |
+| `deployment_mode` | `single_process` (`shared` for multi-instance Redis) |
+| `shared_sync_timeout_seconds` | `5.0` |
+| `shared_max_entries`, `shared_max_leases` | `50000`, `1024` |
+| `shared_max_receipts`, `shared_max_partitions` | `100000`, `50000` |
+| `shared_max_distinct_tags`, `shared_max_tags_per_entry` | `100000`, `64` |
+| `shared_max_tag_chars` | `256` |
+| `distributed_lease_seconds`, `distributed_renew_interval_seconds` | `15.0`, `5.0` |
 
 Legacy model/prompt/temperature fields are insufficient to establish trusted request identity. Explicit-context calls reject conflicting legacy keywords. Calls with a fixed cache context may map compatible legacy per-call keywords into that context; use `RequestContext` for new code.
 
