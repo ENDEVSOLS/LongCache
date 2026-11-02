@@ -111,7 +111,14 @@ return 1
 class SharedRedisCacheBackend(RedisCacheBackend):
     """A distinct generation whose mutations are visible to all participants."""
 
-    def __init__(self, *args, shared_max_entries: int = 50_000, **kwargs):
+    def __init__(
+        self,
+        *args,
+        shared_max_entries: int = 50_000,
+        distributed_lease_seconds: float = 15.0,
+        distributed_renew_interval_seconds: float = 5.0,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         cache_id, generation = kwargs["cache_id"], kwargs["generation"]
         self.ROOT = f"longcache:shared-v1:{cache_id}:{generation}"
@@ -124,6 +131,8 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         self.ALL_IDS = self.ROOT + ":ids"
         self.DIRTY = self.ROOT + ":dirty"
         self._shared_max_entries = shared_max_entries
+        self._lease_seconds = distributed_lease_seconds
+        self._renew_interval = distributed_renew_interval_seconds
         self._manifest = None
 
     def _namespace_key(self, namespace: str) -> str:
@@ -146,6 +155,8 @@ class SharedRedisCacheBackend(RedisCacheBackend):
                 "coordination": "shared-v1",
                 "max_entries": self._max_entries,
                 "shared_max_entries": self._shared_max_entries,
+                "lease_seconds": self._lease_seconds,
+                "renew_interval": self._renew_interval,
             }
         )
         key = self.ROOT + ":manifest"
@@ -410,15 +421,11 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         return []
 
     def sweep_expired(self) -> int:
-        """Bound work spent removing references to expired Redis entry keys."""
+        """Bound cleanup of expired and logically invalidated shared entries."""
         cursor, ids = self._client.sscan(
             self.ALL_IDS, cursor=getattr(self, "_scan_cursor", 0), count=256
         )
         self._scan_cursor = cursor
-        expired = [
-            identifier
-            for identifier in ids
-            if not self._client.exists(self._entry_key(int(identifier)))
-        ]
-        self._remove(expired)
-        return len(expired)
+        invalid = [identifier for identifier in ids if self.retrieve(int(identifier)) is None]
+        self._remove(invalid)
+        return len(invalid)

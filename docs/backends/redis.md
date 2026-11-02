@@ -6,7 +6,9 @@ Every owned key uses `longcache:v2:<cache_id>:<generation>`, including entries, 
 
 A populated generation whose manifest is missing fails closed. Do not recreate its manifest manually or reuse its identity for a different model; select a fresh generation and preserve the old keys for diagnosis.
 
-Redis persists responses and TTLs. The FAISS index stays local: use **one LongCache process per cache generation**. Shared response storage alone is not multi-instance consistency.
+In the default single-process mode, Redis persists responses and TTLs while FAISS stays local: use **one LongCache process per cache generation**. Shared response storage alone is not multi-instance consistency.
+
+The v0.4 development branch also has an opt-in `deployment_mode="shared"` using a separate `shared-v1` generation. See [shared Redis deployment](../deployment.md) for its consistency rules, current qualification status, and limits. The default mode still uses the v2 generation described above.
 
 `backend="async_redis"` fails immediately through `LongCache`. `AsyncRedisCacheBackend` remains a standalone experimental storage adapter with separate tests.
 

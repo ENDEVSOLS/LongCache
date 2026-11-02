@@ -94,7 +94,11 @@ class LongCache:
                 self.backend.close()
             raise
         self._sweep_thread = None
-        if not metadata_only and self.config.ttl_seconds and hasattr(self.backend, "sweep_expired"):
+        if (
+            not metadata_only
+            and (self.config.ttl_seconds or self.config.deployment_mode == "shared")
+            and hasattr(self.backend, "sweep_expired")
+        ):
             self._sweep_thread = threading.Thread(
                 target=self._sweep, daemon=True, name="longcache-sweeper"
             )
@@ -117,6 +121,8 @@ class LongCache:
                     generation=c.generation,
                     timeout=c.backend_timeout_seconds,
                     shared_max_entries=c.shared_max_entries,
+                    distributed_lease_seconds=c.distributed_lease_seconds,
+                    distributed_renew_interval_seconds=c.distributed_renew_interval_seconds,
                 )
             from longcache.backends.redis import RedisCacheBackend
 

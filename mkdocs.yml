@@ -81,6 +81,11 @@ nav:
     - FastAPI: integrations/fastapi.md
     - Changing-document RAG: integrations/versioned-rag.md
   - Reliability and Upgrade: reliability.md
+  - Shared Redis Deployment (Development): deployment.md
+  - v0.4 Implementation Plan: plans/v0.4.0.md
+  - v0.4 Execution Record: plans/v0.4.0-execution.md
+  - v0.4 Acceptance Evidence: plans/v0.4.0-acceptance.md
+  - Upgrade to v0.4 Shared Mode: migration-v0.4.md
   - v0.3 Implementation Plan: plans/v0.3.0.md
   - v0.3 Execution Record: plans/v0.3.0-execution.md
   - v0.3 Acceptance Evidence: plans/v0.3.0-acceptance.md

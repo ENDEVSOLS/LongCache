@@ -2,6 +2,17 @@
 
 All notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased] — v0.4 development
+
+### Added
+
+- Opt-in shared Redis mode with a separate keyspace, revision-checked local indexes, authoritative replay guards, scoped invalidation fences, and distributed exact-request leases.
+- Two-instance RAG example, process-level acceptance tests, deployment/migration guidance, and a detailed implementation and qualification plan.
+
+### Qualification
+
+- Local Python 3.12 and Redis 7.2 tests are recorded in `docs/plans/v0.4.0-execution.md`. Scale, full fault, installed-wheel, hosted CI, and release-candidate gates remain open. Package metadata remains v0.3.0 until v0.4 qualification is complete.
+
 ## [0.3.0] - 2026-10-29
 
 ### Added

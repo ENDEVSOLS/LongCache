@@ -17,16 +17,17 @@ from .identity import digest
 
 
 class _LeaseRenewal:
-    def __init__(self, backend, key: str, token: str):
+    def __init__(self, backend, key: str, token: str, ttl_ms: int, interval: float):
         self.backend, self.key, self.token = backend, key, token
+        self.ttl_ms, self.interval = ttl_ms, interval
         self.stop_event = threading.Event()
         self.lost = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True, name="longcache-lease")
 
     def _run(self):
-        while not self.stop_event.wait(5):
+        while not self.stop_event.wait(self.interval):
             try:
-                if not self.backend.renew_flight(self.key, self.token, 15_000):
+                if not self.backend.renew_flight(self.key, self.token, self.ttl_ms):
                     self.lost.set()
                     return
             except Exception:
@@ -135,6 +136,7 @@ class DistributedExecution:
             raise TypeError("get_or_compute requires a synchronous callable")
         cache = self.cache
         tags = cache._execution.options(ttl, tags)
+        lease_ms = int(cache.config.distributed_lease_seconds * 1000)
         with cache._lifecycle.operation():
             prepared, reason, shared_epoch, flight_key = self._prepare(
                 query, context, namespace, ttl, tags
@@ -171,7 +173,7 @@ class DistributedExecution:
             while True:
                 self._check_epoch(shared_epoch)
                 key, token = cache._dependency(
-                    "backend", cache.backend.acquire_flight, flight_key, 15_000
+                    "backend", cache.backend.acquire_flight, flight_key, lease_ms
                 )
                 if token is not None:
                     try:
@@ -198,7 +200,13 @@ class DistributedExecution:
                                 entry_point,
                                 decision.reason,
                             )
-                        with _LeaseRenewal(cache.backend, key, token) as renewal:
+                        with _LeaseRenewal(
+                            cache.backend,
+                            key,
+                            token,
+                            lease_ms,
+                            cache.config.distributed_renew_interval_seconds,
+                        ) as renewal:
                             result = cache._execution.origin(compute)
                             if not renewal.lost.is_set():
                                 stored = cache.set(
@@ -314,6 +322,7 @@ class DistributedExecution:
             raise TypeError("aget_or_compute requires an awaitable-producing callable")
         cache = self.cache
         tags = cache._execution.options(ttl, tags)
+        lease_ms = int(cache.config.distributed_lease_seconds * 1000)
         with cache._lifecycle.operation():
             prepared, reason, shared_epoch, flight_key = await self._call(
                 self._prepare, query, context, namespace, ttl, tags
@@ -352,7 +361,7 @@ class DistributedExecution:
             deadline = time.monotonic() + cache.config.singleflight_wait_timeout_seconds
             while True:
                 await self._call(self._check_epoch, shared_epoch)
-                key, token = await self._call(cache.backend.acquire_flight, flight_key, 15_000)
+                key, token = await self._call(cache.backend.acquire_flight, flight_key, lease_ms)
                 if token is not None:
                     try:
                         await self._call(self._check_epoch, shared_epoch)
@@ -381,7 +390,13 @@ class DistributedExecution:
                                 entry_point,
                                 decision.reason,
                             )
-                        with _LeaseRenewal(cache.backend, key, token) as renewal:
+                        with _LeaseRenewal(
+                            cache.backend,
+                            key,
+                            token,
+                            lease_ms,
+                            cache.config.distributed_renew_interval_seconds,
+                        ) as renewal:
                             result = await cache._execution.aorigin(compute)
                             if not renewal.lost.is_set():
                                 stored = await cache.aset(

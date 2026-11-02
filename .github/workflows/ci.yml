@@ -27,7 +27,7 @@ jobs:
         python-version: ["3.11", "3.12"]
     services:
       redis:
-        image: redis:7
+        image: redis:7.2-alpine
         ports:
           - 16379:6379
         options: >-
@@ -71,6 +71,10 @@ jobs:
       - name: Evaluate changing-document RAG workflow
         if: matrix.python-version == '3.12'
         run: uv run --no-sync python -m evaluation.rag --output evaluation/reports/v0_3_rag.json
+
+      - name: Run two-instance shared Redis example
+        if: matrix.python-version == '3.12'
+        run: uv run --no-sync python examples/multi_instance_rag.py
 
       - name: Run offline public-interface example
         run: uv run --no-sync python examples/safe_reuse.py
