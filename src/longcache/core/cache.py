@@ -25,6 +25,7 @@ from .errors import CacheOperationError
 from .observability import Observability
 from .reliability import dependency, decision_operation, operational, execution_operation
 from .execution import Execution
+from .distributed_singleflight import DistributedExecution
 from .policy import admit, decode_response, verify
 
 
@@ -60,6 +61,7 @@ class LongCache:
         self._closed = False
         self._coherent = True
         self._epoch = 0
+        self._shared_revision = -1
         self._background_failed = False
         self._observability = Observability(self.config.track_stats, self.config.backend)
         self._ready = False
@@ -76,6 +78,9 @@ class LongCache:
             self._finalize_resources, self._revoke_flights, self.config.shutdown_timeout_seconds
         )
         self._execution = Execution(self)
+        self._distributed_execution = (
+            DistributedExecution(self) if self.config.deployment_mode == "shared" else None
+        )
         # Metadata-only construction does not load/download model weights.
         try:
             if self._dependency("backend", self.backend.list_all_entries):
@@ -102,6 +107,17 @@ class LongCache:
         if c.backend == "sqlite":
             return SQLiteCacheBackend(c.db_path, c.max_entries, timeout=c.backend_timeout_seconds)
         if c.backend == "redis":
+            if c.deployment_mode == "shared":
+                from longcache.backends.redis_shared import SharedRedisCacheBackend
+
+                return SharedRedisCacheBackend(
+                    redis_url=c.redis_url,
+                    max_entries=c.max_entries,
+                    cache_id=c.cache_id,
+                    generation=c.generation,
+                    timeout=c.backend_timeout_seconds,
+                    shared_max_entries=c.shared_max_entries,
+                )
             from longcache.backends.redis import RedisCacheBackend
 
             return RedisCacheBackend(
@@ -167,6 +183,49 @@ class LongCache:
                 continue
             entries.append(entry)
         self._dependency("index", self.index.rebuild, entries)
+
+    def _synchronize_shared(self):
+        """Never search a local index without checking authoritative Redis state."""
+        if self.config.deployment_mode != "shared":
+            return
+        deadline = time.monotonic() + self.config.shared_sync_timeout_seconds
+        with self._mutation_lock:
+            while True:
+                before = self._dependency("backend", self.backend.revision)
+                if self._shared_revision == before:
+                    return
+                if self._shared_revision >= 0 and self._shared_revision < before:
+                    cursor = self._shared_revision
+                    additive = True
+                    while cursor < before and additive:
+                        events = self._dependency(
+                            "backend", self.backend.events, cursor + 1, before
+                        )
+                        if not events:
+                            additive = False
+                            break
+                        for sequence, event in events:
+                            if sequence != cursor + 1 or event.get("type") != "store":
+                                additive = False
+                                break
+                            entry = self._dependency(
+                                "backend", self.backend.retrieve, int(event["id"])
+                            )
+                            if entry is not None:
+                                self._dependency("index", self.index.add, entry.vector, entry.id)
+                            cursor = sequence
+                        if time.monotonic() >= deadline:
+                            raise CacheOperationError("synchronization")
+                    if additive and cursor == before:
+                        self._shared_revision = before
+                        return
+                self._rebuild_index_from_backend()
+                after = self._dependency("backend", self.backend.revision)
+                if before == after:
+                    self._shared_revision = after
+                    return
+                if time.monotonic() >= deadline:
+                    raise CacheOperationError("synchronization")
 
     def _prepare(self, query, context, namespace, legacy, *, _initialize=True):
         self._ensure_open()
@@ -253,6 +312,7 @@ class LongCache:
         if reason:
             return LookupDecision("BYPASS", reason, threshold=threshold)
         ctx, partition, identity = prepared
+        self._synchronize_shared()
         with self._mutation_lock:
             if self.index.size == 0:
                 if not _inspect and _record and not _cancel.is_set():
@@ -305,6 +365,11 @@ class LongCache:
                 continue
             with self._mutation_lock:
                 self._ensure_open()
+                shared_epoch = (
+                    self._dependency("backend", self.backend.epoch)
+                    if self.config.deployment_mode == "shared"
+                    else None
+                )
                 current = self._dependency("backend", self.backend.retrieve, entry.id)
                 if (
                     current is None
@@ -324,6 +389,11 @@ class LongCache:
                     continue
                 if _cancel is not None and _cancel.is_set():
                     return LookupDecision("BYPASS", "cancelled", threshold=threshold)
+                if shared_epoch is not None and not self._dependency(
+                    "backend", self.backend.validate_hit, current, expected_epoch=shared_epoch
+                ):
+                    reason = "expired_or_deleted"
+                    continue
                 if not _inspect and _record:
                     try:
                         self._dependency("accounting", self.backend.update_hit_count, entry.id)
@@ -339,6 +409,7 @@ class LongCache:
                     threshold,
                     _epoch=self._epoch,
                     _expires_at=current.expires_at,
+                    _shared_epoch=shared_epoch,
                 )
         if len(candidates) > self.config.verification_budget:
             reason = "verification_budget_exhausted"
@@ -412,11 +483,16 @@ class LongCache:
         context=None,
         _cancel=None,
         _expected_epoch=None,
+        _expected_shared_epoch=None,
+        _lease_key="",
+        _lease_token="",
     ):
         _cancel = _cancel or self._lifecycle.current
         if _expected_epoch is None:
             with self._mutation_lock:
                 _expected_epoch = self._epoch
+        if self.config.deployment_mode == "shared" and _expected_shared_epoch is None:
+            _expected_shared_epoch = self._dependency("backend", self.backend.epoch)
         if self._metadata_only:
             raise ValueError("Vector operations require a normal cache instance")
         prepared, reason = self._prepare(
@@ -469,11 +545,26 @@ class LongCache:
             if _cancel is not None and _cancel.is_set():
                 return StoreDecision("REJECTED", "cancelled")
             try:
-                identifier = self._dependency("store", self.backend.store, entry)
+                if self.config.deployment_mode == "shared":
+                    identifier = self._dependency(
+                        "store",
+                        self.backend.store,
+                        entry,
+                        expected_epoch=_expected_shared_epoch,
+                        lease_key=_lease_key,
+                        lease_token=_lease_token,
+                    )
+                    if identifier == 0:
+                        return StoreDecision("REJECTED", "invalidated")
+                    if identifier == -1:
+                        return StoreDecision("REJECTED", "capacity")
+                else:
+                    identifier = self._dependency("store", self.backend.store, entry)
                 try:
                     self._dependency("index", self.index.add, vector, identifier)
                 except Exception:
-                    self._dependency("store", self.backend.delete, identifier)
+                    if self.config.deployment_mode != "shared":
+                        self._dependency("store", self.backend.delete, identifier)
                     raise
                 excess = (
                     self._dependency("backend", self.backend.count, partition)
@@ -503,6 +594,16 @@ class LongCache:
         _entry_point="manual",
     ):
         """Reuse a verified answer or coordinate one exact scoped computation."""
+        if self._distributed_execution is not None:
+            return self._distributed_execution.run(
+                query,
+                compute,
+                context=context,
+                namespace=namespace,
+                ttl=ttl,
+                tags=tags,
+                entry_point=_entry_point,
+            )
         return self._execution.run(
             query,
             compute,
@@ -526,6 +627,16 @@ class LongCache:
         _entry_point="manual",
     ):
         """Async equivalent; followers await without occupying worker threads."""
+        if self._distributed_execution is not None:
+            return await self._distributed_execution.arun(
+                query,
+                compute,
+                context=context,
+                namespace=namespace,
+                ttl=ttl,
+                tags=tags,
+                entry_point=_entry_point,
+            )
         return await self._execution.arun(
             query,
             compute,

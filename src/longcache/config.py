@@ -48,6 +48,9 @@ class CacheConfig:
     cache_error_policy: str = "raise"
     backend_timeout_seconds: float = 2.0
     shutdown_timeout_seconds: float = 5.0
+    deployment_mode: str = "single_process"
+    shared_sync_timeout_seconds: float = 5.0
+    shared_max_entries: int = 50_000
     faiss_index_type: str = "flat"
     hnsw_m: int = 32
     hnsw_ef_search: int = 64
@@ -78,12 +81,19 @@ class CacheConfig:
             "singleflight_wait_timeout_seconds",
             "backend_timeout_seconds",
             "shutdown_timeout_seconds",
+            "shared_sync_timeout_seconds",
         ):
             value = getattr(self, name)
             if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be positive and finite")
         if self.cache_error_policy not in ("raise", "bypass"):
             raise ValueError("Invalid cache_error_policy")
+        if self.deployment_mode not in ("single_process", "shared"):
+            raise ValueError("Invalid deployment_mode")
+        if self.deployment_mode == "shared" and self.backend != "redis":
+            raise ValueError("Shared deployment requires the Redis backend")
+        if type(self.shared_max_entries) is not int or self.shared_max_entries < 1:
+            raise ValueError("shared_max_entries must be a positive integer")
 
         if self.scope_policy not in ("private", "tenant_shared", "public"):
             raise ValueError("Invalid scope_policy")
