@@ -76,6 +76,13 @@ jobs:
         if: matrix.python-version == '3.12'
         run: uv run --no-sync python examples/multi_instance_rag.py
 
+      - name: Smoke deployment benchmark against actual v0.3 source
+        if: matrix.python-version == '3.12'
+        run: |
+          mkdir -p /tmp/longcache-v03-baseline
+          git archive e384615 | tar -x -C /tmp/longcache-v03-baseline
+          uv run --no-sync python -m evaluation.deployment --baseline-root /tmp/longcache-v03-baseline --smoke
+
       - name: Run offline public-interface example
         run: uv run --no-sync python examples/safe_reuse.py
 
@@ -93,6 +100,7 @@ jobs:
           path: |
             evaluation/reports/pytest-ci.xml
             evaluation/reports/v0_3_rag.json
+            evaluation/reports/v0_4_deployment-smoke.json
 
   model-evaluation:
     timeout-minutes: 30

@@ -62,6 +62,7 @@ class LongCache:
         self._coherent = True
         self._epoch = 0
         self._shared_revision = -1
+        self._shared_compaction_pending = False
         self._background_failed = False
         self._observability = Observability(self.config.track_stats, self.config.backend)
         self._ready = False
@@ -172,7 +173,16 @@ class LongCache:
             )
             if not self._ready:
                 self._fingerprint = descriptor.fingerprint
+                before = (
+                    self._dependency("backend", self.backend.revision)
+                    if self.config.deployment_mode == "shared"
+                    else None
+                )
                 self._rebuild_index_from_backend()
+                if before is not None and before == self._dependency(
+                    "backend", self.backend.revision
+                ):
+                    self._shared_revision = before
                 self._ready = True
 
     def _rebuild_index_from_backend(self):
@@ -202,27 +212,38 @@ class LongCache:
                     return
                 if self._shared_revision >= 0 and self._shared_revision < before:
                     cursor = self._shared_revision
-                    additive = True
-                    while cursor < before and additive:
+                    complete = True
+                    while cursor < before and complete:
                         events = self._dependency(
                             "backend", self.backend.events, cursor + 1, before
                         )
                         if not events:
-                            additive = False
+                            complete = False
                             break
                         for sequence, event in events:
-                            if sequence != cursor + 1 or event.get("type") != "store":
-                                additive = False
+                            if sequence != cursor + 1:
+                                complete = False
                                 break
-                            entry = self._dependency(
-                                "backend", self.backend.retrieve, int(event["id"])
-                            )
-                            if entry is not None:
-                                self._dependency("index", self.index.add, entry.vector, entry.id)
+                            kind = event.get("type")
+                            if kind == "store":
+                                entry = self._dependency(
+                                    "backend", self.backend.retrieve, int(event["id"])
+                                )
+                                if entry is not None:
+                                    self._dependency(
+                                        "index", self.index.add, entry.vector, entry.id
+                                    )
+                            elif kind in ("delete", "invalidate"):
+                                # Redis validates every candidate at replay. Old vectors
+                                # are harmless until the background index compacts them.
+                                self._shared_compaction_pending = True
+                            else:
+                                complete = False
+                                break
                             cursor = sequence
                         if time.monotonic() >= deadline:
                             raise CacheOperationError("synchronization")
-                    if additive and cursor == before:
+                    if complete and cursor == before:
                         self._shared_revision = before
                         return
                 self._rebuild_index_from_backend()
@@ -552,7 +573,7 @@ class LongCache:
                 return StoreDecision("REJECTED", "cancelled")
             try:
                 if self.config.deployment_mode == "shared":
-                    identifier = self._dependency(
+                    identifier, commit_revision = self._dependency(
                         "store",
                         self.backend.store,
                         entry,
@@ -572,13 +593,20 @@ class LongCache:
                     if self.config.deployment_mode != "shared":
                         self._dependency("store", self.backend.delete, identifier)
                     raise
-                excess = (
-                    self._dependency("backend", self.backend.count, partition)
-                    - self.config.max_entries
-                )
-                if excess > 0:
-                    self._dependency("store", self.backend.evict_oldest, partition, excess)
-                    self._rebuild_index_from_backend()
+                if (
+                    self.config.deployment_mode == "shared"
+                    and commit_revision is not None
+                    and self._shared_revision == commit_revision - 1
+                ):
+                    self._shared_revision = commit_revision
+                if self.config.deployment_mode != "shared":
+                    excess = (
+                        self._dependency("backend", self.backend.count, partition)
+                        - self.config.max_entries
+                    )
+                    if excess > 0:
+                        self._dependency("store", self.backend.evict_oldest, partition, excess)
+                        self._rebuild_index_from_backend()
             except BaseException:
                 self._coherent = False
                 raise
@@ -790,7 +818,16 @@ class LongCache:
                 self._epoch += 1
                 self._execution.registry.abort()
                 count = self._dependency("store", self.backend.delete_namespace, prepared[1])
+                revision = (
+                    self._dependency("backend", self.backend.revision)
+                    if self.config.deployment_mode == "shared"
+                    else None
+                )
                 self._rebuild_index_from_backend()
+                if revision is not None and revision == self._dependency(
+                    "backend", self.backend.revision
+                ):
+                    self._shared_revision = revision
                 return count
             except BaseException:
                 self._coherent = False
@@ -806,7 +843,16 @@ class LongCache:
                 self._epoch += 1
                 self._execution.registry.abort()
                 count = self._dependency("store", self.backend.delete_by_tag, tag, prepared[1])
+                revision = (
+                    self._dependency("backend", self.backend.revision)
+                    if self.config.deployment_mode == "shared"
+                    else None
+                )
                 self._rebuild_index_from_backend()
+                if revision is not None and revision == self._dependency(
+                    "backend", self.backend.revision
+                ):
+                    self._shared_revision = revision
                 return count
             except BaseException:
                 self._coherent = False
@@ -822,7 +868,16 @@ class LongCache:
                 self._epoch += 1
                 self._execution.registry.abort()
                 count = self._dependency("store", self.backend.clear)
+                revision = (
+                    self._dependency("backend", self.backend.revision)
+                    if self.config.deployment_mode == "shared"
+                    else None
+                )
                 self._dependency("index", self.index.rebuild, [])
+                if revision is not None and revision == self._dependency(
+                    "backend", self.backend.revision
+                ):
+                    self._shared_revision = revision
                 return count
             except BaseException:
                 self._coherent = False
@@ -874,9 +929,11 @@ class LongCache:
                 with self._lifecycle.operation(), self._mutation_lock:
                     if not self._coherent:
                         return
-                    if self._dependency("sweeper", self.backend.sweep_expired) and self._ready:
+                    removed = self._dependency("sweeper", self.backend.sweep_expired)
+                    if (removed or self._shared_compaction_pending) and self._ready:
                         try:
                             self._rebuild_index_from_backend()
+                            self._shared_compaction_pending = False
                         except BaseException:
                             self._coherent = False
                             raise

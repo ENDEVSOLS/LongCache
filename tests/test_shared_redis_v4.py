@@ -106,6 +106,18 @@ def test_incremental_write_catchup_and_delete_rebuild(pair):
     assert second.get("second", context=context) is None
 
 
+def test_local_store_cursor_does_not_skip_remote_commit(pair):
+    first, second = pair
+    context = trusted_context()
+    assert first.set("first", "one", context=context).outcome == "STORED"
+    assert first._shared_revision == first.backend.revision()
+    assert second.set("remote", "two", context=context).outcome == "STORED"
+    assert first.set("third", "three", context=context).outcome == "STORED"
+    assert first._shared_revision < first.backend.revision()
+    assert first.get("remote", context=context) == "two"
+    assert first._shared_revision == first.backend.revision()
+
+
 def test_trimmed_journal_rebuilds_from_authoritative_store(pair):
     first, second = pair
     context = trusted_context()
@@ -135,6 +147,21 @@ def test_tag_invalidation_fences_write_missing_from_its_pre_read(pair, monkeypat
     assert second.get("question", context=context) is None
     assert first.backend.sweep_expired() == 1
     assert first.backend.count(prepared[1]) == 0
+
+
+def test_remote_invalidation_replay_does_not_rebuild_full_index(pair, monkeypatch):
+    first, second = pair
+    context = trusted_context()
+    assert first.set("question", "old", context=context, tags=["doc"]).outcome == "STORED"
+    assert second.get("question", context=context) == "old"
+    assert first.invalidate_by_tag("doc", context=context) == 1
+
+    def unexpected_rebuild():
+        raise AssertionError("Remote invalidation must use authoritative replay guard")
+
+    monkeypatch.setattr(second, "_rebuild_index_from_backend", unexpected_rebuild)
+    assert second.get("question", context=context) is None
+    assert second._shared_compaction_pending
 
 
 def test_new_process_rebuilds_hnsw_from_shared_generation():

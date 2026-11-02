@@ -43,7 +43,7 @@ redis.call('HSET', key, 'commit_seq', revision)
 redis.call('XADD', KEYS[8], revision .. '-0', 'type', 'store', 'id', id)
 redis.call('XTRIM', KEYS[8], 'MAXLEN', '~', 100000)
 redis.call('DEL', KEYS[11])
-return id
+return {id, revision}
 """
 
 _REMOVE = """
@@ -202,7 +202,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         expected_epoch: int | None = None,
         lease_key: str = "",
         lease_token: str = "",
-    ) -> int:
+    ) -> tuple[int, int | None]:
         if self._manifest is None:
             raise ValueError("Shared manifest was not initialized")
         if expected_epoch is None:
@@ -223,35 +223,35 @@ class SharedRedisCacheBackend(RedisCacheBackend):
             "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
         }
         ttl_ms = max(1, int((entry.expires_at - time.time()) * 1000)) if entry.expires_at else 0
-        identifier = int(
-            self._client.eval(
-                _STORE,
-                11,
-                self.ROOT + ":manifest",
-                self.EPOCH,
-                self.ID_COUNTER,
-                self._namespace_key(entry.namespace),
-                self.NAMESPACE_SET,
-                self.ALL_IDS,
-                self.REVISION,
-                self.JOURNAL,
-                self.ROOT + ":entry_partition",
-                self.ROOT + ":entry_tags",
-                self.DIRTY,
-                self._manifest,
-                str(expected_epoch),
-                self.KEY_PREFIX,
-                json.dumps(data, allow_nan=False),
-                entry.namespace,
-                encoded_tags,
-                ttl_ms,
-                self._max_entries,
-                self._shared_max_entries,
-                lease_key,
-                lease_token,
-            )
+        result = self._client.eval(
+            _STORE,
+            11,
+            self.ROOT + ":manifest",
+            self.EPOCH,
+            self.ID_COUNTER,
+            self._namespace_key(entry.namespace),
+            self.NAMESPACE_SET,
+            self.ALL_IDS,
+            self.REVISION,
+            self.JOURNAL,
+            self.ROOT + ":entry_partition",
+            self.ROOT + ":entry_tags",
+            self.DIRTY,
+            self._manifest,
+            str(expected_epoch),
+            self.KEY_PREFIX,
+            json.dumps(data, allow_nan=False),
+            entry.namespace,
+            encoded_tags,
+            ttl_ms,
+            self._max_entries,
+            self._shared_max_entries,
+            lease_key,
+            lease_token,
         )
-        return identifier
+        if isinstance(result, list):
+            return int(result[0]), int(result[1])
+        return int(result), None
 
     def acquire_flight(self, exact_key: str, ttl_ms: int) -> tuple[str, str | None]:
         self._healthy()
