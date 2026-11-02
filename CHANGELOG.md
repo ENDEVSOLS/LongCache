@@ -2,7 +2,7 @@
 
 All notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [v0.4.0] — 2026-11-02
+## [0.4.0] - 2026-11-02
 
 ### Added
 
@@ -11,7 +11,7 @@ All notable changes are recorded here using [Keep a Changelog](https://keepachan
 
 ### Qualification
 
-- Local Python 3.12 and Redis 7.2 tests are recorded in `docs/plans/v0.4.0-execution.md`. Scale, full fault, installed-wheel, hosted CI, and release-candidate gates remain open. Package metadata remains v0.3.0 until v0.4 qualification is complete.
+- Local Python 3.12 and Redis 7.2 tests are recorded in `docs/plans/v0.4.0-execution.md`. Scale, full fault, installed-wheel, hosted CI, and release-candidate gates remain open. Package metadata is v0.4.0.
 
 ## [0.3.0] - 2026-10-29
 

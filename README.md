@@ -58,7 +58,7 @@ uv pip install longcache[redis]
 uv pip install longcache[all]
 ```
 
-To try the development line (v0.4 features on the `0.3.0` package version), check out
+To try the development line (v0.4 features on the `0.4.0` package version), check out
 the development branch and install from the repository directory containing `pyproject.toml`:
 
 ```bash

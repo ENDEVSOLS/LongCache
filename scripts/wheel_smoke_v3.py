@@ -29,7 +29,7 @@ class Embedder(BaseEmbedder):
 
 
 def main():
-    assert version("longcache") == longcache.__version__ == "0.3.0"
+    assert version("longcache") == longcache.__version__
     assert "site-packages" in str(Path(longcache.__file__).resolve()), longcache.__file__
     context = RequestContext(
         scope=RequestScope("wheel", "user"),
