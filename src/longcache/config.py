@@ -51,6 +51,7 @@ class CacheConfig:
     deployment_mode: str = "single_process"
     shared_sync_timeout_seconds: float = 5.0
     shared_max_entries: int = 50_000
+    shared_max_leases: int = 1024
     distributed_lease_seconds: float = 15.0
     distributed_renew_interval_seconds: float = 5.0
     faiss_index_type: str = "flat"
@@ -98,6 +99,8 @@ class CacheConfig:
             raise ValueError("Shared deployment requires the Redis backend")
         if type(self.shared_max_entries) is not int or self.shared_max_entries < 1:
             raise ValueError("shared_max_entries must be a positive integer")
+        if type(self.shared_max_leases) is not int or self.shared_max_leases < 1:
+            raise ValueError("shared_max_leases must be a positive integer")
         if self.distributed_renew_interval_seconds > self.distributed_lease_seconds / 3:
             raise ValueError("Lease renewal interval must be at most one-third of its lifetime")
         if not 0.1 <= self.distributed_lease_seconds <= 300:

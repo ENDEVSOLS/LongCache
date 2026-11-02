@@ -33,7 +33,9 @@ with LongCache(config) as cache:
     )
 ```
 
-Each process has its own FAISS index. Redis stores entries, a mutation revision/journal, and request leases. Before a lookup searches its local index, it reads the Redis revision and applies new store events or rebuilds after deletion/invalidation. A hit must pass an atomic Redis check of the current entry, expiry, identity metadata, and invalidation state. A disconnected process cannot safely serve its old local index.
+Each process has its own FAISS index. Redis stores entries, a mutation revision/journal, and request leases. Before a lookup searches its local index, it reads the Redis revision and applies new store events. Deletion and invalidation events make old vectors ineligible through Redis guards, and a background sweep compacts the local index. A journal gap triggers a full rebuild. A hit must pass an atomic Redis check of the current entry, expiry, identity metadata, and invalidation state. A disconnected process cannot safely serve its old local index.
+
+Tag, partition, and operator invalidations advance a shared watermark before returning. Other processes reject old entries immediately; a bounded background sweep later removes their Redis references. The call counts entries seen live during a revision-checked scan. Under very high concurrent write churn, it may fail with an invalidation-conflict error after five retries; retry after the churn subsides. Shared mode caps active leases at `shared_max_leases=1024` by default and returns a capacity error when full. The Redis generation manifest binds that limit, so changing it requires a new generation.
 
 Shared execution uses the same exact identity, effective TTL, and tags in every process. A lease has a 15-second lifetime and is renewed every five seconds while its owner runs. A healthy overlapping burst shares one origin call; after owner failure or expiry, a new call may execute the origin again. Keep provider callbacks safe to repeat and set their own timeouts. Manual lookup → generation → store and arbitrary ASGI work do not gain distributed coalescing.
 

@@ -7,12 +7,14 @@ provides a revision that every reader checks before consulting that index.
 from __future__ import annotations
 
 import hashlib
+from itertools import islice
 import json
 import time
 from uuid import uuid4
 
 from longcache.backends.redis import RedisCacheBackend
 from longcache.core.entry import CacheEntry
+from longcache.core.errors import CacheOperationError, SingleflightCapacityError
 from longcache.core.identity import canonical
 
 
@@ -84,6 +86,59 @@ redis.call('DEL', KEYS[8])
 return count
 """
 
+_INVALIDATE = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return redis.error_reply('incompatible manifest') end
+if redis.call('EXISTS', KEYS[5]) == 1 then return redis.error_reply('shared generation is uncertain') end
+if tonumber(redis.call('GET', KEYS[2]) or '0') ~= tonumber(ARGV[2]) then return -1 end
+redis.call('SET', KEYS[5], '1')
+local revision = redis.call('INCR', KEYS[2])
+redis.call('SET', ARGV[3], revision)
+redis.call('INCR', KEYS[4])
+redis.call('XADD', KEYS[3], revision .. '-0', 'type', 'invalidate')
+redis.call('XTRIM', KEYS[3], 'MAXLEN', '~', 100000)
+redis.call('DEL', KEYS[5])
+return tonumber(ARGV[4])
+"""
+
+_ACQUIRE_FLIGHT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return redis.error_reply('incompatible manifest') end
+if redis.call('EXISTS', KEYS[5]) == 1 then return redis.error_reply('shared generation is uncertain') end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', now - 1)
+if redis.call('EXISTS', KEYS[2]) == 1 then return {0, 0} end
+if redis.call('ZCARD', KEYS[3]) >= tonumber(ARGV[3]) then return {-1, 0} end
+local token = ARGV[2] .. ':' .. redis.call('INCR', KEYS[4])
+redis.call('SET', KEYS[2], token, 'PX', ARGV[4])
+redis.call('ZADD', KEYS[3], now + tonumber(ARGV[4]), KEYS[2])
+redis.call('DEL', KEYS[6])
+return {1, token}
+"""
+
+_RENEW_FLIGHT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+redis.call('PEXPIRE', KEYS[1], ARGV[2])
+redis.call('ZADD', KEYS[2], now + tonumber(ARGV[2]), KEYS[1])
+return 1
+"""
+
+_RELEASE_FLIGHT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('DEL', KEYS[1])
+redis.call('ZREM', KEYS[2], KEYS[1])
+return 1
+"""
+
+_FINISH_FLIGHT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+redis.call('SET', KEYS[3], ARGV[2], 'PX', 30000)
+redis.call('DEL', KEYS[1])
+redis.call('ZREM', KEYS[2], KEYS[1])
+return 1
+"""
+
 _VALIDATE = """
 if redis.call('EXISTS', KEYS[4]) == 1 then return 0 end
 if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
@@ -115,6 +170,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         self,
         *args,
         shared_max_entries: int = 50_000,
+        shared_max_leases: int = 1024,
         distributed_lease_seconds: float = 15.0,
         distributed_renew_interval_seconds: float = 5.0,
         **kwargs,
@@ -131,6 +187,9 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         self.ALL_IDS = self.ROOT + ":ids"
         self.DIRTY = self.ROOT + ":dirty"
         self._shared_max_entries = shared_max_entries
+        self._shared_max_leases = shared_max_leases
+        self.LEASES = self.ROOT + ":leases"
+        self.LEASE_COUNTER = self.ROOT + ":lease_counter"
         self._lease_seconds = distributed_lease_seconds
         self._renew_interval = distributed_renew_interval_seconds
         self._manifest = None
@@ -155,6 +214,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
                 "coordination": "shared-v1",
                 "max_entries": self._max_entries,
                 "shared_max_entries": self._shared_max_entries,
+                "shared_max_leases": self._shared_max_leases,
                 "lease_seconds": self._lease_seconds,
                 "renew_interval": self._renew_interval,
             }
@@ -256,28 +316,33 @@ class SharedRedisCacheBackend(RedisCacheBackend):
     def acquire_flight(self, exact_key: str, ttl_ms: int) -> tuple[str, str | None]:
         self._healthy()
         key = f"{self.ROOT}:flight:{exact_key}"
-        token = uuid4().hex
-        acquired = self._client.eval(
-            "if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', ARGV[2]) then "
-            "redis.call('DEL', KEYS[2]); return 1 end return 0",
-            2,
+        result = self._client.eval(
+            _ACQUIRE_FLIGHT,
+            6,
+            self.ROOT + ":manifest",
             key,
+            self.LEASES,
+            self.LEASE_COUNTER,
+            self.DIRTY,
             key + ":terminal",
-            token,
+            self._manifest,
+            uuid4().hex,
+            self._shared_max_leases,
             ttl_ms,
         )
-        return key, token if acquired else None
+        if int(result[0]) == -1:
+            raise SingleflightCapacityError("Shared lease capacity reached")
+        return key, result[1] if int(result[0]) == 1 else None
 
     def finish_flight(self, key: str, token: str, outcome: str) -> bool:
         if outcome not in ("error", "cancelled", "non_shareable"):
             raise ValueError("Invalid terminal flight outcome")
         return bool(
             self._client.eval(
-                "if redis.call('GET', KEYS[1]) == ARGV[1] then "
-                "redis.call('SET', KEYS[2], ARGV[2], 'PX', 30000); "
-                "redis.call('DEL', KEYS[1]); return 1 end return 0",
-                2,
+                _FINISH_FLIGHT,
+                3,
                 key,
+                self.LEASES,
                 key + ":terminal",
                 token,
                 outcome,
@@ -290,10 +355,10 @@ class SharedRedisCacheBackend(RedisCacheBackend):
     def renew_flight(self, key: str, token: str, ttl_ms: int) -> bool:
         return bool(
             self._client.eval(
-                "if redis.call('GET', KEYS[1]) == ARGV[1] then "
-                "return redis.call('PEXPIRE', KEYS[1], ARGV[2]) end return 0",
-                1,
+                _RENEW_FLIGHT,
+                2,
                 key,
+                self.LEASES,
                 token,
                 ttl_ms,
             )
@@ -301,10 +366,10 @@ class SharedRedisCacheBackend(RedisCacheBackend):
 
     def release_flight(self, key: str, token: str) -> None:
         self._client.eval(
-            "if redis.call('GET', KEYS[1]) == ARGV[1] then "
-            "return redis.call('DEL', KEYS[1]) end return 0",
-            1,
+            _RELEASE_FLIGHT,
+            2,
             key,
+            self.LEASES,
             token,
         )
 
@@ -352,52 +417,79 @@ class SharedRedisCacheBackend(RedisCacheBackend):
             )
         )
 
-    def _remove(self, ids, *, invalidate=False, watermark=None):
-        if not ids and not invalidate:
-            return 0
-        return int(
-            self._client.eval(
-                _REMOVE,
-                8,
-                self.ROOT + ":manifest",
-                self.ALL_IDS,
-                self.REVISION,
-                self.JOURNAL,
-                self.EPOCH,
-                self.ROOT + ":entry_partition",
-                self.ROOT + ":entry_tags",
-                self.DIRTY,
-                self._manifest,
-                json.dumps([str(identifier) for identifier in ids]),
-                self.KEY_PREFIX,
-                self.ROOT + ":tag",
-                self.ROOT + ":ns",
-                "invalidate" if invalidate else "delete",
-                watermark or self.ROOT + ":wm:all",
+    def _remove(self, ids):
+        total = 0
+        iterator = iter(ids)
+        while batch := list(islice(iterator, 256)):
+            total += int(
+                self._client.eval(
+                    _REMOVE,
+                    8,
+                    self.ROOT + ":manifest",
+                    self.ALL_IDS,
+                    self.REVISION,
+                    self.JOURNAL,
+                    self.EPOCH,
+                    self.ROOT + ":entry_partition",
+                    self.ROOT + ":entry_tags",
+                    self.DIRTY,
+                    self._manifest,
+                    json.dumps([str(identifier) for identifier in batch]),
+                    self.KEY_PREFIX,
+                    self.ROOT + ":tag",
+                    self.ROOT + ":ns",
+                    "delete",
+                    self.ROOT + ":wm:all",
+                )
             )
-        )
+        return total
+
+    def _count_live(self, key: str) -> int:
+        cursor, count = 0, 0
+        while True:
+            cursor, identifiers = self._client.sscan(key, cursor=cursor, count=256)
+            count += sum(self.retrieve(int(identifier)) is not None for identifier in identifiers)
+            if cursor == 0:
+                return count
+
+    def _invalidate(self, membership: str, watermark: str) -> int:
+        for _ in range(5):
+            before = self.revision()
+            count = self._count_live(membership)
+            result = int(
+                self._client.eval(
+                    _INVALIDATE,
+                    5,
+                    self.ROOT + ":manifest",
+                    self.REVISION,
+                    self.JOURNAL,
+                    self.EPOCH,
+                    self.DIRTY,
+                    self._manifest,
+                    before,
+                    watermark,
+                    count,
+                )
+            )
+            if result >= 0:
+                return result
+        raise CacheOperationError("invalidation_conflict")
 
     def delete(self, entry_id: int) -> bool:
         return bool(self._remove([entry_id]))
 
     def delete_namespace(self, namespace: str) -> int:
-        return self._remove(
-            self._client.smembers(self._namespace_key(namespace)),
-            invalidate=True,
-            watermark=self._namespace_watermark(namespace),
+        return self._invalidate(
+            self._namespace_key(namespace), self._namespace_watermark(namespace)
         )
 
     def delete_by_tag(self, tag: str, namespace: str) -> int:
-        return self._remove(
-            self._client.smembers(self._tag_key(namespace, tag)),
-            invalidate=True,
-            watermark=self._tag_watermark(namespace, tag),
-        )
+        return self._invalidate(self._tag_key(namespace, tag), self._tag_watermark(namespace, tag))
 
     def clear(self) -> int:
         if self._manifest is None:
             return 0
-        return self._remove(self._client.smembers(self.ALL_IDS), invalidate=True)
+        return self._invalidate(self.ALL_IDS, self.ROOT + ":wm:all")
 
     def update_hit_count(self, entry_id: int) -> None:
         self._client.eval(

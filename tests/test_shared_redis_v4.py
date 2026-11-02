@@ -6,13 +6,18 @@ from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import get_context
 import asyncio
 import os
+import threading
 import time
 from uuid import uuid4
 
 import pytest
 
 from longcache import CacheConfig, LongCache
-from longcache.core.errors import CacheOperationError, SingleflightLeaderError
+from longcache.core.errors import (
+    CacheOperationError,
+    SingleflightCapacityError,
+    SingleflightLeaderError,
+)
 from tests.helpers import HashEmbedder, trusted_context
 
 
@@ -127,23 +132,35 @@ def test_trimmed_journal_rebuilds_from_authoritative_store(pair):
     assert second.get("question", context=context) == "answer"
 
 
+def test_connection_pool_reconnect_revalidates_remote_invalidation(pair):
+    first, second = pair
+    context = trusted_context()
+    assert first.set("question", "old", context=context, tags=["doc"]).outcome == "STORED"
+    assert second.get("question", context=context) == "old"
+    second.backend._client.connection_pool.disconnect()
+    assert first.invalidate_by_tag("doc", context=context) == 1
+    assert second.get("question", context=context) is None
+    assert first.set("question", "new", context=context, tags=["doc"]).outcome == "STORED"
+    assert second.get("question", context=context) == "new"
+
+
 def test_tag_invalidation_fences_write_missing_from_its_pre_read(pair, monkeypatch):
     first, second = pair
     context = trusted_context()
     prepared, reason = first._prepare("question", context, None, {})
     assert reason is None
     tag_key = first.backend._tag_key(prepared[1], "doc")
-    original = first.backend._client.smembers
+    original = first.backend._client.sscan
 
-    def concurrent_write(key):
-        ids = original(key)
+    def concurrent_write(key, *args, **kwargs):
+        result = original(key, *args, **kwargs)
         if key == tag_key:
-            monkeypatch.setattr(first.backend._client, "smembers", original)
+            monkeypatch.setattr(first.backend._client, "sscan", original)
             assert second.set("question", "old", context=context, tags=["doc"]).outcome == "STORED"
-        return ids
+        return result
 
-    monkeypatch.setattr(first.backend._client, "smembers", concurrent_write)
-    assert first.invalidate_by_tag("doc", context=context) == 0
+    monkeypatch.setattr(first.backend._client, "sscan", concurrent_write)
+    assert first.invalidate_by_tag("doc", context=context) == 1
     assert second.get("question", context=context) is None
     assert first.backend.sweep_expired() == 1
     assert first.backend.count(prepared[1]) == 0
@@ -162,6 +179,123 @@ def test_remote_invalidation_replay_does_not_rebuild_full_index(pair, monkeypatc
     monkeypatch.setattr(second, "_rebuild_index_from_backend", unexpected_rebuild)
     assert second.get("question", context=context) is None
     assert second._shared_compaction_pending
+
+
+def test_large_tag_invalidation_is_logical_then_cleaned_in_pages():
+    config = _config("bulk-invalidate-" + uuid4().hex, ttl=0)
+    with LongCache(config, embedder=HashEmbedder()) as cache:
+        context = trusted_context()
+        for number in range(600):
+            assert (
+                cache.set(f"question-{number}", "old", context=context, tags=["bulk"]).outcome
+                == "STORED"
+            )
+        assert cache.invalidate_by_tag("bulk", context=context) == 600
+        assert cache.get("question-0", context=context) is None
+        assert cache.get("question-599", context=context) is None
+        assert cache.backend._client.scard(cache.backend.ALL_IDS) == 600
+        for _ in range(10):
+            cache.backend.sweep_expired()
+            if cache.backend._client.scard(cache.backend.ALL_IDS) == 0:
+                break
+        assert cache.backend._client.scard(cache.backend.ALL_IDS) == 0
+        assert (
+            cache.set("new question", "fresh", context=context, tags=["bulk"]).outcome == "STORED"
+        )
+        assert cache.get("new question", context=context) == "fresh"
+        cache.clear(operator=True)
+
+
+def test_shared_lease_capacity_and_expiry():
+    config = CacheConfig.from_dict(
+        _config("lease-cap-" + uuid4().hex).to_dict() | {"shared_max_leases": 2}
+    )
+    with LongCache(config, embedder=HashEmbedder()) as cache:
+        cache._ensure_ready()
+        key_one, token_one = cache.backend.acquire_flight("one", 1000)
+        _, token_two = cache.backend.acquire_flight("two", 50)
+        assert token_one and token_two
+        with pytest.raises(SingleflightCapacityError):
+            cache.backend.acquire_flight("three", 1000)
+        time.sleep(0.06)
+        key_three, token_three = cache.backend.acquire_flight("three", 1000)
+        assert token_three and key_three != key_one
+        assert int(token_three.rsplit(":", 1)[1]) > int(token_one.rsplit(":", 1)[1])
+        cache.backend.release_flight(key_one, token_one)
+        assert cache.backend._client.zcard(cache.backend.LEASES) == 1
+        cache.backend.release_flight(key_three, token_three)
+
+
+@pytest.mark.asyncio
+async def test_long_sync_origin_renews_lease_for_async_follower():
+    config = _config("mixed-renew-" + uuid4().hex, lease=0.3, renew=0.09)
+    first = LongCache(config, embedder=HashEmbedder())
+    second = LongCache(config, embedder=HashEmbedder())
+    context = trusted_context()
+    started = threading.Event()
+    follower_calls = 0
+
+    def slow_origin():
+        started.set()
+        time.sleep(0.8)
+        return "first answer"
+
+    async def follower_origin():
+        nonlocal follower_calls
+        follower_calls += 1
+        return "duplicate answer"
+
+    try:
+        leader = asyncio.create_task(
+            asyncio.to_thread(first.get_or_compute, "question", slow_origin, context=context)
+        )
+        for _ in range(50):
+            if started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert started.is_set()
+        await asyncio.sleep(0.4)
+        follower = asyncio.create_task(
+            second.aget_or_compute("question", follower_origin, context=context)
+        )
+        assert await asyncio.wait_for(leader, 5) == "first answer"
+        assert await asyncio.wait_for(follower, 5) == "first answer"
+        assert follower_calls == 0
+    finally:
+        first.clear(operator=True)
+        first.close()
+        second.close()
+
+
+@pytest.mark.asyncio
+async def test_async_leader_cancellation_releases_lease_and_notifies_follower(pair):
+    first, second = pair
+    context = trusted_context()
+    started = asyncio.Event()
+    follower_calls = 0
+
+    async def leader_origin():
+        started.set()
+        await asyncio.Event().wait()
+
+    async def follower_origin():
+        nonlocal follower_calls
+        follower_calls += 1
+        return "duplicate"
+
+    leader = asyncio.create_task(first.aget_or_compute("question", leader_origin, context=context))
+    await asyncio.wait_for(started.wait(), 5)
+    follower = asyncio.create_task(
+        second.aget_or_compute("question", follower_origin, context=context)
+    )
+    await asyncio.sleep(0.1)
+    leader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+    with pytest.raises(SingleflightLeaderError):
+        await asyncio.wait_for(follower, 5)
+    assert follower_calls == 0
+    assert first.backend._client.zcard(first.backend.LEASES) == 0
 
 
 def test_new_process_rebuilds_hnsw_from_shared_generation():
@@ -185,6 +319,8 @@ def test_new_process_rebuilds_hnsw_from_shared_generation():
 def test_expired_owner_cannot_publish_or_release_new_owner(pair):
     first, second = pair
     context = trusted_context()
+    first._ensure_ready()
+    second._ensure_ready()
     key, old_token = first.backend.acquire_flight("lease-race", 30)
     assert old_token is not None
     time.sleep(0.05)

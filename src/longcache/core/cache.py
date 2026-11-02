@@ -122,6 +122,7 @@ class LongCache:
                     generation=c.generation,
                     timeout=c.backend_timeout_seconds,
                     shared_max_entries=c.shared_max_entries,
+                    shared_max_leases=c.shared_max_leases,
                     distributed_lease_seconds=c.distributed_lease_seconds,
                     distributed_renew_interval_seconds=c.distributed_renew_interval_seconds,
                 )
