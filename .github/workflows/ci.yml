@@ -184,4 +184,5 @@ jobs:
         run: |
           uv python install 3.10
           uv venv /tmp/python310 --python 3.10
-          python scripts/check_python_requirement.py --python /tmp/python310/bin/python --wheel dist/longcache-0.3.0-py3-none-any.whl
+          wheel_path=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          python scripts/check_python_requirement.py --python /tmp/python310/bin/python --wheel "$wheel_path"
