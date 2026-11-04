@@ -1,5 +1,6 @@
 """Regression tests for the 0.1.1 cache and index fixes."""
 
+from dataclasses import replace
 import numpy as np
 import pytest
 from longcache import BaseEmbedder, EmbeddingDescriptor
@@ -83,12 +84,13 @@ def test_rebuild_keeps_custom_namespaces_after_invalidation(monkeypatch):
 
 def test_sqlite_restart_restores_context_and_custom_namespace(monkeypatch, tmp_path):
     config = CacheConfig(backend="sqlite", db_path=str(tmp_path / "cache.db"), ttl_seconds=0)
+    ctx_a = replace(trusted_context(), model="model-a")
     first = make_cache(monkeypatch, config)
-    first.set("first", "scoped", namespace="custom", model="model-a")
+    first.set("first", "scoped", namespace="custom", context=ctx_a)
     first.set("second", "plain", namespace="other")
     first.close()
     second = make_cache(monkeypatch, config)
-    assert second.get("first", namespace="custom", model="model-a") == "scoped"
+    assert second.get("first", namespace="custom", context=ctx_a) == "scoped"
     assert second.get("second", namespace="other") == "plain"
     second.close()
 

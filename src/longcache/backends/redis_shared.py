@@ -341,7 +341,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         self._healthy()
         return int(self._client.get(self.EPOCH) or 0)
 
-    def store(
+    def store_shared(
         self,
         entry: CacheEntry,
         *,
@@ -425,6 +425,10 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         if int(result) == -2:
             return -1, None
         return int(result), None
+
+    def store(self, entry: CacheEntry) -> int:
+        identifier, _ = self.store_shared(entry)
+        return identifier
 
     def acquire_flight(self, exact_key: str, ttl_ms: int) -> tuple[str, str | None]:
         self._healthy()

@@ -97,6 +97,7 @@ class LongCache:
         self._sweep_thread = None
         if (
             not metadata_only
+            and self.config.backend != "memory"
             and (self.config.ttl_seconds or self.config.deployment_mode == "shared")
             and hasattr(self.backend, "sweep_expired")
         ):
@@ -587,7 +588,7 @@ class LongCache:
                 if self.config.deployment_mode == "shared":
                     identifier, commit_revision = self._dependency(
                         "store",
-                        self.backend.store,
+                        self.backend.store_shared,
                         entry,
                         expected_epoch=_expected_shared_epoch,
                         lease_key=_lease_key,
