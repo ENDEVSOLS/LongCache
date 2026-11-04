@@ -21,7 +21,11 @@
 <a href="https://github.com/ENDEVSOLS/LongCache/blob/main/CHANGELOG.md"><strong>Changelog</strong></a>
 </p>
 
-**LongCache** reuses stored responses when trusted scope, execution context, response admission, and verification permit reuse. Python 3.11 and 3.12 are tested; v0.1.1 remains the Python 3.10-compatible line. See the [Support Matrix](docs/support-matrix.md) and [Upgrading to v0.5](docs/migration-v0.5.md). Measure response quality, latency, and savings on your own workload.
+---
+
+## What is LongCache?
+
+**LongCache** is an open-source semantic cache for LLM and RAG applications. Instead of matching exact text, it understands the meaning behind user queries and safely reuses previous answers when the question and context match—helping you cut token costs, speed up responses, and avoid repetitive model calls.
 
 
 ---
