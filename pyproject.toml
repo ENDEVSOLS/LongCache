@@ -140,8 +140,16 @@ module = [
     "redis.*",
     "openai",
     "openai.*",
+    "numpy",
+    "numpy.*",
+    "click",
+    "click.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["longcache.cli"]
+disallow_untyped_decorators = false
 
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }
