@@ -1,13 +1,20 @@
 """OpenAI adapter for the tested non-streaming single-turn text subset."""
 
 from __future__ import annotations
+
 from dataclasses import replace
 import inspect
 import math
+from typing import Any
+
 from longcache import CacheConfig, Instruction, LongCache, RequestContext
 
 
-def prepare_request(kwargs, base, codec):
+def prepare_request(
+    kwargs: dict[str, Any],
+    base: RequestContext | None,
+    codec: str,
+) -> tuple[tuple[str, RequestContext] | None, str | None]:
     if not isinstance(base, RequestContext):
         return None, "missing_identity"
     if set(kwargs) - {"messages", "model", "temperature", "stream"}:
@@ -48,7 +55,7 @@ def prepare_request(kwargs, base, codec):
             instruction.content.encode("utf-8")
     except UnicodeError:
         return None, "unsupported_request_shape"
-    generation = {}
+    generation: dict[str, Any] = {}
     if "temperature" in kwargs:
         temp = kwargs["temperature"]
         if temp is not None and (
@@ -64,9 +71,13 @@ def prepare_request(kwargs, base, codec):
     ), None
 
 
-def snapshot_request(kwargs, query, context):
+def snapshot_request(
+    kwargs: dict[str, Any],
+    query: str,
+    context: RequestContext,
+) -> dict[str, Any]:
     """Reconstruct the validated subset from the same snapshot used for identity."""
-    request = {
+    request: dict[str, Any] = {
         "model": context.model,
         "messages": [{"role": i.role, "content": i.content} for i in context.instructions]
         + [{"role": "user", "content": query}],
@@ -81,14 +92,14 @@ def snapshot_request(kwargs, query, context):
 class CachedOpenAI:
     def __init__(
         self,
-        client,
-        cache=None,
-        config=None,
-        namespace="openai",
+        client: Any,
+        cache: LongCache | None = None,
+        config: CacheConfig | None = None,
+        namespace: str = "openai",
         *,
-        context=None,
-        response_codec=None,
-    ):
+        context: RequestContext | None = None,
+        response_codec: str | None = None,
+    ) -> None:
         self._client = client
         self._owns_cache = cache is None
         self.cache = cache if cache is not None else LongCache(config or CacheConfig())
@@ -101,42 +112,52 @@ class CachedOpenAI:
             raise ValueError("Unsupported OpenAI response codec")
         self.chat = _ChatProxy(self)
 
-    def _extract_query(self, messages):
+    def _extract_query(self, messages: list[Any]) -> str:
         """Legacy inspection helper; never used to decide cache eligibility."""
         for message in reversed(messages):
             if isinstance(message, dict) and message.get("role") == "user":
-                return message.get("content", "")
+                return str(message.get("content", ""))
         return str(messages)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._client, name)
 
-    def close(self):
+    def close(self) -> None:
         """Close only an internally constructed cache; the provider client is borrowed."""
         if self._owns_cache:
             self.cache.close()
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         if self._owns_cache:
             await self.cache.aclose()
 
-    def __enter__(self):
+    def __enter__(self) -> CachedOpenAI:
         return self
 
-    def __exit__(self, exc_type, exc, traceback):
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> Any:
         if self._owns_cache:
             return self.cache.__exit__(exc_type, exc, traceback)
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> CachedOpenAI:
         return self
 
-    async def __aexit__(self, exc_type, exc, traceback):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: Any,
+    ) -> Any:
         if self._owns_cache:
             return await self.cache.__aexit__(exc_type, exc, traceback)
 
 
 class _ChatProxy:
-    def __init__(self, parent):
+    def __init__(self, parent: CachedOpenAI) -> None:
         cls = (
             AsyncCachedChatCompletions
             if inspect.iscoroutinefunction(parent._client.chat.completions.create)
@@ -145,28 +166,30 @@ class _ChatProxy:
         self.completions = cls(parent)
         self._parent = parent
 
-    def create(self, **kwargs):
+    def create(self, **kwargs: Any) -> Any:
         return self.completions.create(**kwargs)
 
-    async def acreate(self, **kwargs):
+    async def acreate(self, **kwargs: Any) -> Any:
         return await self.completions.acreate(**kwargs)
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._parent._client.chat, name)
 
 
 class CachedChatCompletions:
-    def __init__(self, parent):
+    def __init__(self, parent: CachedOpenAI) -> None:
         self._parent = parent
 
-    def create(self, *, cache_context=None, **kwargs):
+    def create(self, *, cache_context: RequestContext | None = None, **kwargs: Any) -> Any:
         parent = self._parent
         prepared, reason = prepare_request(
             kwargs, cache_context if cache_context is not None else parent.context, parent.codec
         )
         if prepared is None:
             return parent.cache._pass_through(
-                lambda: parent._client.chat.completions.create(**kwargs), reason, "openai"
+                lambda: parent._client.chat.completions.create(**kwargs),
+                reason or "unsupported_request_shape",
+                "openai",
             )
         query, ctx = prepared
         kwargs = snapshot_request(kwargs, query, ctx)
@@ -178,7 +201,7 @@ class CachedChatCompletions:
             _entry_point="openai",
         )
 
-    async def acreate(self, *, cache_context=None, **kwargs):
+    async def acreate(self, *, cache_context: RequestContext | None = None, **kwargs: Any) -> Any:
         parent = self._parent
         client = parent._client.chat.completions
         call = (
@@ -192,7 +215,11 @@ class CachedChatCompletions:
             kwargs, cache_context if cache_context is not None else parent.context, parent.codec
         )
         if prepared is None:
-            return await parent.cache._apass_through(lambda: call(**kwargs), reason, "openai")
+            return await parent.cache._apass_through(
+                lambda: call(**kwargs),
+                reason or "unsupported_request_shape",
+                "openai",
+            )
         query, ctx = prepared
         kwargs = snapshot_request(kwargs, query, ctx)
         return await parent.cache.aget_or_compute(
@@ -205,5 +232,5 @@ class CachedChatCompletions:
 
 
 class AsyncCachedChatCompletions(CachedChatCompletions):
-    async def create(self, **kwargs):
-        return await self.acreate(**kwargs)
+    async def create(self, *, cache_context: RequestContext | None = None, **kwargs: Any) -> Any:
+        return await self.acreate(cache_context=cache_context, **kwargs)

@@ -251,7 +251,9 @@ class SimilarityIndex:
                 (self._orphan_count / total) * 100,
             )
             entries = self._backend.list_all_entries()
-            filtered_entries = [e for e in entries if e.id is not None and e.id not in self._removed_entry_ids]
+            filtered_entries = [
+                e for e in entries if e.id is not None and e.id not in self._removed_entry_ids
+            ]
             self.rebuild(filtered_entries)
             self._orphan_count = 0
 

@@ -1,16 +1,23 @@
 """Bounded ASGI adapter. Authentication and authorization remain application concerns."""
 
 from __future__ import annotations
+
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, MutableMapping
 from dataclasses import replace
 import inspect
 import json
-from longcache import CacheConfig, LongCache, RequestScope
+from typing import Any
+
+from longcache import CacheConfig, CacheError, LongCache, RequestContext, RequestScope
 from longcache.integrations.openai import prepare_request
-from longcache import CacheError
+
+Receive = Callable[[], Awaitable[MutableMapping[str, Any]]]
+Send = Callable[[MutableMapping[str, Any]], Awaitable[None]]
+ASGIApp = Callable[[MutableMapping[str, Any], Receive, Send], Awaitable[None]]
 
 
-def _object(pairs):
-    result = {}
+def _object(pairs: list[tuple[Any, Any]]) -> dict[Any, Any]:
+    result: dict[Any, Any] = {}
     for key, value in pairs:
         if key in result:
             raise ValueError("Duplicate request keys are not cacheable")
@@ -21,16 +28,16 @@ def _object(pairs):
 class LongCacheMiddleware:
     def __init__(
         self,
-        app,
-        cache=None,
-        config=None,
-        namespace="http",
-        cached_routes=None,
-        exclude_namespaces=None,
+        app: ASGIApp,
+        cache: LongCache | None = None,
+        config: CacheConfig | None = None,
+        namespace: str = "http",
+        cached_routes: Iterable[str] | None = None,
+        exclude_namespaces: Iterable[str] | None = None,
         *,
-        context=None,
-        scope_resolver=None,
-    ):
+        context: RequestContext | None = None,
+        scope_resolver: Callable[[MutableMapping[str, Any]], RequestScope | None] | None = None,
+    ) -> None:
         self.app = app
         self._owns_cache = cache is None
         self.cache = cache if cache is not None else LongCache(config or CacheConfig())
@@ -46,7 +53,12 @@ class LongCacheMiddleware:
             raise ValueError("Scope resolver must be a synchronous callable")
         self.scope_resolver = scope_resolver
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(
+        self,
+        scope: MutableMapping[str, Any],
+        receive: Receive,
+        send: Send,
+    ) -> None:
         if (
             scope["type"] != "http"
             or scope.get("method") != "POST"
@@ -56,7 +68,7 @@ class LongCacheMiddleware:
             await self.app(scope, receive, send)
             return
         limit = self.cache.config.max_capture_bytes
-        frames = []
+        frames: list[MutableMapping[str, Any]] = []
         body = bytearray()
         oversized = False
         while True:
@@ -75,7 +87,7 @@ class LongCacheMiddleware:
         original_replay = self._replay(frames, receive)
         disconnected = False
 
-        async def replay():
+        async def replay() -> MutableMapping[str, Any]:
             nonlocal disconnected
             message = await original_replay()
             if message["type"] == "http.disconnect":
@@ -108,7 +120,9 @@ class LongCacheMiddleware:
             base = None
         prepared = None
         if isinstance(data, dict):
-            prepared, reason = prepare_request(data, base, "openai-dict-v1")
+            prepared, prep_reason = prepare_request(data, base, "openai-dict-v1")
+            if prep_reason is not None:
+                reason = prep_reason
         if prepared is None:
             self.cache._observability.count("requests", operation="lookup", outcome="bypass")
             self.cache._observability.count(
@@ -131,13 +145,13 @@ class LongCacheMiddleware:
             )
             await decorated({"type": "http.response.body", "body": encoded})
             return
-        parts = []
+        parts: list[bytes] = []
         size = 0
         complete = False
         safe = False
         decorated = self._decision_send(send, decision.outcome, decision.reason)
 
-        async def capture(message):
+        async def capture(message: MutableMapping[str, Any]) -> None:
             nonlocal size, complete, safe
             if message["type"] == "http.response.start":
                 response_headers = [(k.lower(), v.lower()) for k, v in message.get("headers", [])]
@@ -180,16 +194,16 @@ class LongCacheMiddleware:
                     warning=True, stage="store", reason="cache_unavailable"
                 )
 
-    async def aclose(self):
+    async def aclose(self) -> None:
         """Wire into application lifespan when this middleware created its cache."""
         if self._owns_cache:
             await self.cache.aclose()
 
     @staticmethod
-    def _replay(frames, receive):
+    def _replay(frames: list[MutableMapping[str, Any]], receive: Receive) -> Receive:
         iterator = iter(frames)
 
-        async def read():
+        async def read() -> MutableMapping[str, Any]:
             try:
                 return next(iterator)
             except StopIteration:
@@ -198,8 +212,13 @@ class LongCacheMiddleware:
         return read
 
     @staticmethod
-    def _decision_send(send, outcome, reason, similarity=None):
-        async def decorated(message):
+    def _decision_send(
+        send: Send,
+        outcome: str,
+        reason: str,
+        similarity: float | None = None,
+    ) -> Send:
+        async def decorated(message: MutableMapping[str, Any]) -> None:
             if message["type"] == "http.response.start":
                 message = dict(message)
                 headers = [
@@ -223,13 +242,20 @@ class StreamingCacheAdapter:
 
     cache_bypass_reason = "unsupported_request_shape"
 
-    def __init__(self, cache, stream_func, namespace="streaming", replay_delay=0, **kwargs):
+    def __init__(
+        self,
+        cache: LongCache,
+        stream_func: Callable[..., Any],
+        namespace: str = "streaming",
+        replay_delay: float = 0,
+        **kwargs: Any,
+    ) -> None:
         self.cache = cache
         self.stream_func = stream_func
 
-    def stream(self, query):
+    def stream(self, query: str) -> Iterator[Any]:
         yield from self.stream_func(query)
 
-    async def astream(self, query):
+    async def astream(self, query: str) -> AsyncIterator[Any]:
         async for chunk in self.stream_func(query):
             yield chunk

@@ -11,7 +11,7 @@ format:
 	ruff check --fix .
 
 typecheck:
-	mypy src/longcache/ --ignore-missing-imports
+	mypy src/longcache/ --strict
 
 test:
 	pytest -v --tb=short

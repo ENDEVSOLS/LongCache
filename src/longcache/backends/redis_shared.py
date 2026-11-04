@@ -675,9 +675,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
 
     def sweep_expired(self) -> int:
         """Bound cleanup of expired and logically invalidated shared entries."""
-        cursor, ids = self._client.sscan(
-            self.ALL_IDS, cursor=self._scan_cursor, count=256
-        )
+        cursor, ids = self._client.sscan(self.ALL_IDS, cursor=self._scan_cursor, count=256)
         self._scan_cursor = int(cursor)
         invalid = [identifier for identifier in ids if self.retrieve(int(identifier)) is None]
         self._remove(invalid)

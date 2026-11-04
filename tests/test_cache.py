@@ -393,7 +393,9 @@ class TestCompositeCacheKeys:
         cache_gpt.embedder = mock_embedder
 
         config_flash = CacheConfig(backend="memory")
-        cache_flash = LongCache(config_flash, context=replace(trusted_context(), model="gemini-1.5-flash"))
+        cache_flash = LongCache(
+            config_flash, context=replace(trusted_context(), model="gemini-1.5-flash")
+        )
         cache_flash.embedder = mock_embedder
 
         query = "Explain backpropagation"
@@ -411,8 +413,13 @@ class TestCompositeCacheKeys:
         cache.embedder = mock_embedder
 
         query = "What is a stock?"
-        ctx_trader = replace(trusted_context(), instructions=(Instruction("system", "You are a wall street trader"),))
-        ctx_teacher = replace(trusted_context(), instructions=(Instruction("system", "You are a kindergarten teacher"),))
+        ctx_trader = replace(
+            trusted_context(), instructions=(Instruction("system", "You are a wall street trader"),)
+        )
+        ctx_teacher = replace(
+            trusted_context(),
+            instructions=(Instruction("system", "You are a kindergarten teacher"),),
+        )
         cache.set(query, "Finance answer", context=ctx_trader)
 
         assert cache.get(query, context=ctx_trader) == "Finance answer"

@@ -339,7 +339,11 @@ class Execution:
         _cancel: Any = None,
     ) -> tuple[Any, bool, LookupDecision | None]:
         if completion.kind == "invalidated":
-            raise type(completion.error)(str(completion.error)) if completion.error else SingleflightInvalidatedError()
+            raise (
+                type(completion.error)(str(completion.error))
+                if completion.error
+                else SingleflightInvalidatedError()
+            )
         if completion.kind == "error":
             raise SingleflightLeaderError(
                 "Shared execution failed or its leader was cancelled"
@@ -446,7 +450,12 @@ class Execution:
 
     def cached(self, state: Start, mode: str, entry_point: str, *, _cancel: Any = None) -> Any:
         try:
-            if state.flight is not None and state.leader and state.decision is not None and state.prepared is not None:
+            if (
+                state.flight is not None
+                and state.leader
+                and state.decision is not None
+                and state.prepared is not None
+            ):
                 self.publish(
                     state.flight,
                     state.decision.response,
@@ -724,7 +733,9 @@ class Execution:
             )
             try:
                 result = await self.aorigin(compute)
-                await cache._lifecycle.call(self.store, state, query, result, namespace, ttl, tags_tuple)
+                await cache._lifecycle.call(
+                    self.store, state, query, result, namespace, ttl, tags_tuple
+                )
                 return await self.afinish(
                     state.prepared,
                     None,

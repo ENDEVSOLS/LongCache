@@ -9,7 +9,7 @@ from functools import wraps
 import inspect
 import threading
 import time
-from typing import Any, Awaitable, Callable, TypeVar, cast, overload
+from typing import Any, Awaitable, Callable, ParamSpec, TypeVar, cast, overload
 
 from longcache.backends.memory import InMemoryCacheBackend
 from longcache.backends.sqlite import SQLiteCacheBackend
@@ -32,6 +32,8 @@ from .reliability import decision_operation, dependency, execution_operation, op
 
 T = TypeVar("T")
 F = TypeVar("F", bound=Callable[..., Any])
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class LongCache:
@@ -783,6 +785,30 @@ class LongCache:
             ),
         )
 
+    @overload
+    def cached(
+        self,
+        func: Callable[P, R],
+        *,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
+        context: RequestContext | None = None,
+        context_resolver: Callable[..., RequestContext | None] | None = None,
+    ) -> Callable[P, R]: ...
+
+    @overload
+    def cached(
+        self,
+        func: None = None,
+        *,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
+        context: RequestContext | None = None,
+        context_resolver: Callable[..., RequestContext | None] | None = None,
+    ) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
+
     def cached(
         self,
         func: Callable[..., Any] | None = None,
@@ -1020,9 +1046,7 @@ class LongCache:
                 return list(self.backend.list_all_entries())
             prepared, reason = self._prepare("maintenance", context, namespace)
             return (
-                []
-                if reason or prepared is None
-                else list(self.backend.list_entries(prepared[1]))
+                [] if reason or prepared is None else list(self.backend.list_entries(prepared[1]))
             )
 
     @managed

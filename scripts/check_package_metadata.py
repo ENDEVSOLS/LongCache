@@ -60,6 +60,16 @@ def check_artifact(artifact: Path, project: dict) -> list[str]:
         for alt, src in relative_images:
             errors.append(f"Image '{alt}' uses relative URL '{src}' which breaks on PyPI")
 
+    # Check PEP 561 py.typed marker
+    if artifact.suffix == ".whl":
+        with zipfile.ZipFile(artifact) as archive:
+            if not any(name.endswith("longcache/py.typed") for name in archive.namelist()):
+                errors.append("missing 'longcache/py.typed' marker in wheel")
+    elif artifact.name.endswith(".tar.gz"):
+        with tarfile.open(artifact) as archive:
+            if not any(name.endswith("longcache/py.typed") for name in archive.getnames()):
+                errors.append("missing 'longcache/py.typed' marker in source distribution")
+
     return errors
 
 

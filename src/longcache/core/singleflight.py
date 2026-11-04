@@ -136,7 +136,9 @@ class Singleflight:
             flights = list(self._flights.values())
             self._flights.clear()
             notifications: list[
-                tuple[list[tuple[asyncio.Future[Completion], asyncio.AbstractEventLoop]], Completion]
+                tuple[
+                    list[tuple[asyncio.Future[Completion], asyncio.AbstractEventLoop]], Completion
+                ]
             ] = []
             for flight in flights:
                 if not flight.future.done():

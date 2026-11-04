@@ -17,11 +17,11 @@ class CachedState:
 
     @staticmethod
     def check(
-        state: dict,
+        state: dict[str, Any],
         cache: LongCache,
         query_key: str = "messages",
         namespace: str = "langgraph",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Return a miss for opaque graph state, preserving legacy query extraction."""
         query_input = state.get(query_key)
 
@@ -32,14 +32,14 @@ class CachedState:
         elif isinstance(query_input, list):
             for msg in reversed(query_input):
                 if hasattr(msg, "content") and getattr(msg, "type", "") == "human":
-                    query = msg.content
+                    query = str(msg.content)
                     break
                 elif hasattr(msg, "content"):
-                    query = msg.content
+                    query = str(msg.content)
             if not query and query_input:
                 query = str(query_input[-1])
         elif isinstance(query_input, dict):
-            query = query_input.get("query", str(query_input))
+            query = str(query_input.get("query", str(query_input)))
         else:
             query = str(query_input)
 
@@ -50,11 +50,11 @@ class CachedState:
 
     @staticmethod
     async def acheck(
-        state: dict,
+        state: dict[str, Any],
         cache: LongCache,
         query_key: str = "messages",
         namespace: str = "langgraph",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Return a miss for opaque graph state, preserving legacy query extraction."""
         query_input = state.get(query_key)
 
@@ -65,14 +65,14 @@ class CachedState:
         elif isinstance(query_input, list):
             for msg in reversed(query_input):
                 if hasattr(msg, "content") and getattr(msg, "type", "") == "human":
-                    query = msg.content
+                    query = str(msg.content)
                     break
                 elif hasattr(msg, "content"):
-                    query = msg.content
+                    query = str(msg.content)
             if not query and query_input:
                 query = str(query_input[-1])
         elif isinstance(query_input, dict):
-            query = query_input.get("query", str(query_input))
+            query = str(query_input.get("query", str(query_input)))
         else:
             query = str(query_input)
 
@@ -83,7 +83,7 @@ class CachedState:
 
     @staticmethod
     def save(
-        state: dict,
+        state: dict[str, Any],
         response: Any,
         cache: LongCache,
         namespace: str = "langgraph",
@@ -94,7 +94,7 @@ class CachedState:
 
     @staticmethod
     async def asave(
-        state: dict,
+        state: dict[str, Any],
         response: Any,
         cache: LongCache,
         namespace: str = "langgraph",

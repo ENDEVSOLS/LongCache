@@ -45,7 +45,9 @@ class LocalEmbedder(BaseEmbedder):
     _dimension: int | None
     _model_lock: threading.Lock
 
-    def __new__(cls, model_name: str = "BAAI/bge-small-en-v1.5", revision: str = "") -> LocalEmbedder:
+    def __new__(
+        cls, model_name: str = "BAAI/bge-small-en-v1.5", revision: str = ""
+    ) -> LocalEmbedder:
         """
         Singleton pattern: one embedder instance per model name.
 

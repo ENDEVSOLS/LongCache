@@ -11,7 +11,12 @@ from longcache.backends.sqlite import SQLiteCacheBackend
 if TYPE_CHECKING:
     from longcache.backends.redis import RedisCacheBackend
 
-__all__ = ["AbstractCacheBackend", "SQLiteCacheBackend", "InMemoryCacheBackend", "get_redis_backend"]
+__all__ = [
+    "AbstractCacheBackend",
+    "SQLiteCacheBackend",
+    "InMemoryCacheBackend",
+    "get_redis_backend",
+]
 
 
 # Lazy import for Redis backend — only available when redis extra is installed

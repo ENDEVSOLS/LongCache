@@ -1,17 +1,22 @@
 """Scoped cache inspection and explicit local operator maintenance."""
 
+from __future__ import annotations
+
 from dataclasses import asdict
 import json
 from pathlib import Path
+from typing import Any, Callable, TypeVar, cast
 import click
 from longcache import CacheConfig, Instruction, LongCache, RequestContext, RequestScope, __version__
 
+FC = TypeVar("FC", bound=Callable[..., Any])
 
-def _get_cache(config=None, *, metadata_only=False):
+
+def _get_cache(config: CacheConfig | None = None, *, metadata_only: bool = False) -> LongCache:
     return LongCache(config or CacheConfig(), metadata_only=metadata_only)
 
 
-def _context(path):
+def _context(path: str | Path | None) -> RequestContext | None:
     if path is None:
         return None
     try:
@@ -24,7 +29,7 @@ def _context(path):
         raise click.ClickException("Invalid context file") from exc
 
 
-def common(fn):
+def common(fn: FC) -> FC:
     for option in [
         click.option("--db-path", default=".longcache/v2/cache.db", show_default=True),
         click.option("--namespace", default="default"),
@@ -44,22 +49,33 @@ def common(fn):
     return fn
 
 
-def _open(db_path, namespace, scope_policy, metadata_only):
+def _open(
+    db_path: str,
+    namespace: str,
+    scope_policy: str,
+    metadata_only: bool,
+) -> LongCache:
     return _get_cache(
-        CacheConfig(db_path=db_path, namespace=namespace, scope_policy=scope_policy),
+        CacheConfig(db_path=db_path, namespace=namespace, scope_policy=cast(Any, scope_policy)),
         metadata_only=metadata_only,
     )
 
 
 @click.group()
 @click.version_option(version=__version__, prog_name="longcache")
-def main():
+def main() -> None:
     """Inspect scoped cache decisions or explicitly maintain an owned v0.2 store."""
 
 
 @main.command()
 @common
-def stats(db_path, namespace, scope_policy, context_file, operator):
+def stats(
+    db_path: str,
+    namespace: str,
+    scope_policy: str,
+    context_file: str | None,
+    operator: bool,
+) -> None:
     """Show counts for the declared scope; process hit/miss counters reset on restart."""
     with _open(db_path, namespace, scope_policy, True) as cache:
         result = cache.stats(context=_context(context_file), operator=operator)
@@ -70,7 +86,14 @@ def stats(db_path, namespace, scope_policy, context_file, operator):
 @main.command()
 @common
 @click.option("--query", required=True)
-def inspect(db_path, namespace, scope_policy, context_file, operator, query):
+def inspect(
+    db_path: str,
+    namespace: str,
+    scope_policy: str,
+    context_file: str | None,
+    operator: bool,
+    query: str,
+) -> None:
     """Explain a lookup without recording a hit. Context is always required."""
     if operator:
         raise click.UsageError(
@@ -91,7 +114,15 @@ def inspect(db_path, namespace, scope_policy, context_file, operator, query):
 @common
 @click.option("--all", "all_partitions", is_flag=True)
 @click.option("--yes", is_flag=True, help="Confirm deletion of the selected owned entries.")
-def clear(db_path, namespace, scope_policy, context_file, operator, all_partitions, yes):
+def clear(
+    db_path: str,
+    namespace: str,
+    scope_policy: str,
+    context_file: str | None,
+    operator: bool,
+    all_partitions: bool,
+    yes: bool,
+) -> None:
     """Delete one exact context, or explicitly delete every owned partition."""
     ctx = _context(context_file)
     if all_partitions and not operator:
@@ -111,7 +142,15 @@ def clear(db_path, namespace, scope_policy, context_file, operator, all_partitio
 @common
 @click.option("--format", "output_format", type=click.Choice(["json"]), default="json")
 @click.option("--output", "-o", type=click.Path(dir_okay=False))
-def export(db_path, namespace, scope_policy, context_file, operator, output_format, output):
+def export(
+    db_path: str,
+    namespace: str,
+    scope_policy: str,
+    context_file: str | None,
+    operator: bool,
+    output_format: str,
+    output: str | None,
+) -> None:
     """Export raw owned payloads only for an explicit context or trusted operator."""
     ctx = _context(context_file)
     if ctx is None and not operator:
