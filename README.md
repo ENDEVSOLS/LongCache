@@ -52,7 +52,7 @@
 # Core — SQLite backend + FAISS + BGE-small (no external services needed)
 uv pip install longcache
 
-# With LangChain + LangGraph compatibility adapters (pass-through in v0.5)
+# With LangChain + LangGraph compatibility adapters
 uv pip install longcache[langchain]
 
 # With Redis response storage (FAISS index remains local to this process)
@@ -62,8 +62,7 @@ uv pip install longcache[redis]
 uv pip install longcache[all]
 ```
 
-To try the development line (v0.5 features on the `0.5.0` package version), check out
-the development branch and install from the repository directory containing `pyproject.toml`:
+To install from a local repository checkout containing `pyproject.toml`:
 
 ```bash
 uv pip install -e "."
@@ -190,7 +189,7 @@ config = CacheConfig(
     cache_error_policy="raise",  # "bypass" permits safe origin execution on runtime cache failures
     backend_timeout_seconds=2.0,  # Per-I/O timeout
     shutdown_timeout_seconds=5.0,  # Shutdown grace period
-    deployment_mode="single_process",  # "shared" = v0.4 multi-instance Redis (opt-in)
+    deployment_mode="single_process",  # "shared" = multi-instance Redis (opt-in)
     faiss_index_type="flat",  # "flat" (exact) | "hnsw" (approximate, faster at scale)
     hnsw_m=32,  # HNSW connections per node
     hnsw_ef_search=64,  # HNSW search depth
@@ -247,7 +246,7 @@ cache = LongCache(config, context=context)
 - ✅ **Semantic Similarity Cache:** Finds paraphrase candidates, then checks scope and reuse policy before serving an answer.
 - ✅ **Local Embedding:** BAAI/bge-small-en-v1.5 runs on-device after its first download; latency depends on hardware.
 - ✅ **`@cache.cached` Decorator:** Scoped caching for query-only sync or async functions; additional arguments bypass
-- ✅ **`@cache.cached_stream` Decorator:** Preserves sync/async generator interfaces as pass-through; no cache reads or writes in v0.5
+- ✅ **`@cache.cached_stream` Decorator:** Preserves sync/async generator interfaces as pass-through; no cache reads or writes
 - ✅ **PEP 561 Static Typing:** Ships `py.typed`, strict generic `@cached` / `get_or_compute` signatures, typed hook protocols, and `PUBLIC_API_STABILITY` tiers
 - ✅ **Composite Cache Keys:** Full SHA-256 identity includes trusted scope, execution settings, versions, codec, policy, and embedding generation
 - ✅ **Tag-Based Invalidation:** Attach tags to entries at write time; invalidate by tag within the exact scoped execution context
@@ -271,11 +270,11 @@ cache = LongCache(config, context=context)
 
 - ✅ **SQLite Backend:** No external service, WAL mode, versioned manifests, transactional initialization; default backend
 - ✅ **Redis Backend:** Versioned durable response storage with TTL; one LongCache process per generation in default mode
-- 🧪 **Shared Redis Mode (v0.4, opt-in):** Journal-synchronized local indexes, guarded replay, and distributed singleflight across processes; under qualification
+- 🧪 **Shared Redis Mode (opt-in):** Journal-synchronized local indexes, guarded replay, and distributed singleflight across processes; under qualification
 - ✅ **Async Redis Backend:** Experimental standalone storage interface; unsupported through `LongCache`
 - ✅ **In-Memory Backend:** Zero I/O, ideal for unit tests and CI/CD pipelines
-- ✅ **LangChain Integration:** `CachedLLM` and `CachedChain` compatibility wrappers; pass-through in v0.5
-- ✅ **LangGraph Integration:** `CachedState` compatibility interface; graph state is not cached in v0.5
+- ✅ **LangChain Integration:** `CachedLLM` and `CachedChain` compatibility pass-through wrappers
+- ✅ **LangGraph Integration:** `CachedState` compatibility interface; graph state is not cached
 - ✅ **LlamaIndex Integration:** `CachedQueryEngine` preserves the engine interface without caching opaque state
 - ✅ **OpenAI Integration:** Supported single-turn text requests with explicit context; sync/async dict and SDK replay
 - ✅ **FastAPI Middleware:** Bounded supported chat-completion JSON with trusted scope resolution and diagnostic headers
@@ -320,7 +319,7 @@ cache = LongCache(
 )
 ```
 
-#### Shared Mode (v0.4 development, opt-in)
+#### Shared Mode (opt-in)
 
 Multiple processes connect to one writable Redis authority. Redis owns entries, an ordered mutation journal, invalidation watermarks, and request leases; each process keeps its own FAISS index and catches up before each lookup.
 
@@ -354,7 +353,7 @@ Shared-mode limits: one Redis authority only. Redis Cluster, Sentinel, failover,
 
 ### Async Redis backend status
 
-`AsyncRedisCacheBackend` can be used and tested as a standalone storage backend (`experimental` tier in `PUBLIC_API_STABILITY`). It is not supported through `LongCache` in v0.5.0; selecting `backend="async_redis"` fails immediately. End-to-end async Redis integration is planned for a later release.
+`AsyncRedisCacheBackend` can be used and tested as a standalone storage backend (`experimental` tier in `PUBLIC_API_STABILITY`). It is not supported through `LongCache`; selecting `backend="async_redis"` fails immediately. End-to-end async Redis integration is planned for a later release.
 
 ### In-Memory (Testing & CI)
 
@@ -372,7 +371,7 @@ cache = LongCache(CacheConfig(backend="memory"))
 
 ## Integrations
 
-**v0.5 support:** generic LangChain, LangGraph, and LlamaIndex adapters below preserve their interfaces as `pass-through` compatibility wrappers (`cache_bypass_reason = "unsupported_request_shape"`). Use the explicit-context manual/decorator path or `CachedOpenAI` / `LongCacheMiddleware` for caching proven application workflows. All streaming helpers also pass through. See the [Support Matrix](docs/support-matrix.md) and [Upgrading to v0.5](docs/migration-v0.5.md).
+Generic LangChain, LangGraph, and LlamaIndex adapters below preserve their interfaces as `pass-through` compatibility wrappers (`cache_bypass_reason = "unsupported_request_shape"`). Use the explicit-context manual/decorator path or `CachedOpenAI` / `LongCacheMiddleware` for caching proven application workflows. All streaming helpers also pass through. See the [Support Matrix](docs/support-matrix.md).
 
 ### LangChain
 
@@ -479,7 +478,7 @@ with OpenAI(timeout=20.0, max_retries=0) as provider, LongCache() as cache:
     )
 ```
 
-In v0.5.0, OpenAI caching requires a complete trusted context and the supported single-turn text subset. Multi-turn, tool, multimodal, structured-output, streaming, and unknown-parameter requests bypass. Complete responses require `finish_reason="stop"`. For varying identities, pass `cache_context=per_request_context`; namespaces alone do not establish tenant isolation.
+OpenAI caching requires a complete trusted context and the supported single-turn text subset. Multi-turn, tool, multimodal, structured-output, streaming, and unknown-parameter requests bypass. Complete responses require `finish_reason="stop"`. For varying identities, pass `cache_context=per_request_context`; namespaces alone do not establish tenant isolation.
 
 ---
 
@@ -532,7 +531,7 @@ adapter = StreamingCacheAdapter(cache, my_stream)
 for token in adapter.stream("What is RAG?"):
     print(token, end="")
 
-# Repeated calls also reach the LLM; streaming replay is unsupported in v0.5
+# Repeated calls also reach the LLM; streaming replay is unsupported
 for token in adapter.stream("What is RAG?"):
     print(token, end="")
 ```
@@ -599,7 +598,7 @@ Main facade class. Accepts an optional `CacheConfig` and explicit request contex
 def my_chain(query: str) -> str: ...
 ```
 
-Use a per-call `context_resolver` when trusted identity varies. For matching inspection/invalidation, derive the decorator context with `my_chain.cache_context_for(context)`. Streaming decorators do not cache in v0.5.
+Use a per-call `context_resolver` when trusted identity varies. For matching inspection/invalidation, derive the decorator context with `my_chain.cache_context_for(context)`. Streaming decorators pass through without caching.
 
 #### `stats()` Return Value
 
@@ -639,7 +638,7 @@ Process hit/miss counters reset on restart; stored entry hit counts persist. Sco
 | `cache_error_policy`                | `str`   | `"raise"`                    | `"raise"` or opt-in `"bypass"` for recognized runtime cache failures            |
 | `backend_timeout_seconds`           | `float` | `2.0`                        | SQLite busy / Redis connect and socket deadlines per I/O                            |
 | `shutdown_timeout_seconds`          | `float` | `5.0`                        | Default shutdown grace period                                                       |
-| `deployment_mode`                   | `str`   | `"single_process"`           | `"shared"` enables v0.4 multi-instance Redis mode (requires `backend="redis"`)     |
+| `deployment_mode`                   | `str`   | `"single_process"`           | `"shared"` enables multi-instance Redis mode (requires `backend="redis"`)           |
 | `shared_sync_timeout_seconds`       | `float` | `5.0`                        | Deadline for index catch-up before a shared lookup                                  |
 | `shared_max_entries`                | `int`   | `50_000`                     | Live entries per shared generation                                                  |
 | `shared_max_leases`                 | `int`   | `1024`                       | Active distributed leases per generation                                            |
@@ -742,7 +741,7 @@ decision = cache.inspect("refund policy", context=context)
 
 ### Custom Integration: Decision-Based Control
 
-Hit accounting is automatic; `record_hit` and `record_miss` were removed in v0.2, and the legacy `track_miss` parameter was removed in v0.5.0.
+Hit and miss accounting is handled automatically on every lookup.
 
 ```python
 def answer(query):
@@ -777,7 +776,7 @@ src/longcache/
 │   ├── policy.py            # Admission, verification, and response codecs
 │   ├── execution.py         # Shared sync/async execution protocol
 │   ├── singleflight.py      # Bounded flights and detachable async waits
-│   ├── distributed_singleflight.py # v0.4 fenced Redis leases, renewal, remote followers
+│   ├── distributed_singleflight.py # Fenced Redis leases, renewal, remote followers
 │   ├── lifecycle.py         # Worker ownership, cancellation, and cleanup
 │   ├── reliability.py       # Runtime error policy and decision accounting
 │   ├── observability.py     # Redacted events and bounded measurements
@@ -787,7 +786,7 @@ src/longcache/
 │   ├── base.py              # AbstractCacheBackend ABC
 │   ├── sqlite.py            # SQLiteCacheBackend — owned connection, WAL, format-2 metadata
 │   ├── redis.py             # RedisCacheBackend — sync, tag support, atomic TTL
-│   ├── redis_shared.py      # v0.4 shared keyspace, journal, watermarks, guarded Lua mutations
+│   ├── redis_shared.py      # Shared keyspace, journal, watermarks, guarded Lua mutations
 │   ├── async_redis.py       # AsyncRedisCacheBackend — standalone experimental adapter
 │   └── memory.py            # InMemoryCacheBackend — testing, zero I/O
 └── integrations/
@@ -838,7 +837,7 @@ Stored entry hit counts persist; process-level hit/miss counters reset on restar
 
 Cache hit rate and savings vary with traffic, threshold, embedding model, and safety rules. Benchmark your own workload. Record hit rate, incorrect-hit rate, bypass rate, p50/p95/p99 latency, and actual provider usage before claiming cost savings.
 
-The v0.4 deployment runner (`python -m evaluation.deployment`) compares archived v0.3 source, the current single-process path, and two shared processes against one Redis service. Development-host results and their limits are in the [benchmarks guide](docs/benchmarks.md) and the [v0.4 execution record](docs/plans/v0.4.0-execution.md). They are not production SLAs.
+The deployment evaluation runner (`python -m evaluation.deployment`) compares the single-process path and two shared processes against one Redis service. Development-host results and their limits are in the [benchmarks guide](docs/benchmarks.md). They are not production SLAs.
 
 ---
 
