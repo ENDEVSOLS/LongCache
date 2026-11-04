@@ -103,3 +103,39 @@ class MetricsSnapshot(TypedDict):
     latencies_ms: dict[str, Any]
     resources: ResourceSnapshot
     health: HealthStatus
+
+
+PUBLIC_API_STABILITY: dict[str, Literal["stable-candidate", "experimental", "pass-through"]] = {
+    # Core stable candidates
+    "LongCache": "stable-candidate",
+    "CacheConfig": "stable-candidate",
+    "Instruction": "stable-candidate",
+    "RequestContext": "stable-candidate",
+    "RequestScope": "stable-candidate",
+    "LookupDecision": "stable-candidate",
+    "StoreDecision": "stable-candidate",
+    "PolicyDecision": "stable-candidate",
+    "BaseEmbedder": "stable-candidate",
+    "EmbeddingDescriptor": "stable-candidate",
+    "CacheError": "stable-candidate",
+    "CacheClosedError": "stable-candidate",
+    "CacheShutdownTimeoutError": "stable-candidate",
+    "CacheCapacityError": "stable-candidate",
+    "CacheOperationError": "stable-candidate",
+    "SingleflightError": "stable-candidate",
+    "SingleflightTimeoutError": "stable-candidate",
+    "SingleflightCapacityError": "stable-candidate",
+    "SingleflightLeaderError": "stable-candidate",
+    "SingleflightReentrancyError": "stable-candidate",
+    "SingleflightInvalidatedError": "stable-candidate",
+    # Introspection
+    "PUBLIC_API_STABILITY": "stable-candidate",
+    # Integrations & Middleware
+    "CachedOpenAI": "experimental",
+    "LongCacheMiddleware": "experimental",
+    "StreamingCacheAdapter": "experimental",
+    "CachedLLM": "pass-through",
+    "CachedChain": "pass-through",
+    "CachedQueryEngine": "pass-through",
+    "CachedState": "pass-through",
+}

@@ -717,9 +717,10 @@ class LongCache:
         namespace: str | None = None,
         ttl: int | None = None,
         tags: Any = None,
-        _entry_point: str = "manual",
+        **kwargs: Any,
     ) -> T:
         """Reuse a verified answer or coordinate one exact scoped computation."""
+        _entry_point: str = kwargs.pop("_entry_point", "manual")
         if self._distributed_execution is not None:
             return cast(
                 T,
@@ -756,9 +757,10 @@ class LongCache:
         namespace: str | None = None,
         ttl: int | None = None,
         tags: Any = None,
-        _entry_point: str = "manual",
+        **kwargs: Any,
     ) -> T:
         """Async equivalent; followers await without occupying worker threads."""
+        _entry_point: str = kwargs.pop("_entry_point", "manual")
         if self._distributed_execution is not None:
             return cast(
                 T,

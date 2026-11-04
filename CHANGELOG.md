@@ -2,6 +2,21 @@
 
 All notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0] - 2026-11-04
+
+### Added
+
+- **PEP 561 Public Typing:** Added `py.typed` marker package data. All modules across core, backends, integrations, middleware, and CLI pass strict typing under `mypy --strict`.
+- **Public API Stability Classification:** Exported `PUBLIC_API_STABILITY` dictionary classifying every exported symbol into `stable-candidate`, `experimental`, or `pass-through` tiers.
+- **Support Matrix Documentation:** Authored comprehensive runtime, OS, backend, and integration matrix in `docs/support-matrix.md` with migration guide in `docs/migration-v0.5.md`.
+- **Type-Check Gate Runner:** Authored `scripts/wheel_typecheck_v5.py` and `tests/test_public_api_v5.py` to enforce that wheels ship `py.typed` and external consumers pass strict typing.
+
+### Changed
+
+- **Liskov Substitution Principle (LSP) Compliance:** Resolved backend signature incompatibility in `SharedRedisCacheBackend.store` by adding standard `store(entry: CacheEntry) -> int` and extracting distributed coordination into `store_shared(...)`.
+- **Public Method Cleanliness:** Removed all leaked private `_`-prefixed keyword arguments from public method signatures across `LongCache` (`lookup`, `alookup`, `set`, `aset`, `get`, `aget`, `get_or_compute`, `aget_or_compute`, `cached`). Internal control flags are cleanly captured via `**kwargs`.
+- **Retired Legacy Parameters:** Removed dead configuration and call-site parameters (`track_miss`, `model`, `system_prompt`, `temperature`) from `CacheConfig` and public cache methods. Identity must be declared explicitly via `RequestContext`.
+
 ## [0.4.0] - 2026-11-02
 
 ### Added
