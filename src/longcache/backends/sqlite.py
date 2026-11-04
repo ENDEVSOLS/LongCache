@@ -207,9 +207,9 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             "created_at": entry.created_at,
             "expires_at": entry.expires_at,
             "hit_count": entry.hit_count,
-            "model": entry.model,
-            "system_prompt": entry.system_prompt,
-            "temperature": entry.temperature,
+            "model": "",
+            "system_prompt": "",
+            "temperature": -1.0,
             "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
         }
 
@@ -225,14 +225,6 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                 response = json.loads(response)
             except (json.JSONDecodeError, TypeError):
                 pass  # Keep as string if not valid JSON
-
-        model = row["model"] if "model" in row.keys() else ""
-        system_prompt = row["system_prompt"] if "system_prompt" in row.keys() else ""
-        temperature = (
-            float(row["temperature"])
-            if "temperature" in row.keys() and row["temperature"] is not None
-            else -1.0
-        )
 
         tags = []
         try:
@@ -253,9 +245,6 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             created_at=row["created_at"],
             expires_at=row["expires_at"],
             hit_count=row["hit_count"],
-            model=model,
-            system_prompt=system_prompt,
-            temperature=temperature,
             tags=tags,
             metadata=json.loads(row["metadata"]),
         )

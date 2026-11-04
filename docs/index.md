@@ -1,12 +1,12 @@
 # LongCache
 
-Semantic response reuse for Python LLM and RAG applications. **v0.4.0 is unreleased; Python 3.11 and 3.12 are the tested interpreters.**
+Semantic response reuse for Python LLM and RAG applications. **v0.5.0 is the current development line; Python 3.11 and 3.12 are the tested interpreters.** See the [Support Matrix](support-matrix.md) and [Upgrading to v0.5](migration-v0.5.md).
 
 LongCache finds similar requests with local embeddings and FAISS, then checks whether their execution context and reuse policy permit the same answer. Similarity alone does not establish correctness. Measure false hits and useful reuse on your own workload.
 
 ## Install
 
-v0.4.0 is currently a development checkout. Package-index commands install the available published release. See [installation](getting-started/installation.md) for installing and validating this branch.
+v0.5.0 is currently a development checkout. Package-index commands install the available published release. See [installation](getting-started/installation.md) for installing and validating this branch.
 
 ```bash
 uv pip install longcache

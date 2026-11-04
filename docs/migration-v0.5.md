@@ -59,3 +59,4 @@ answer = cache.get("What is a stock?", context=trader_ctx)
 ## 4. PEP 561 Typing and `py.typed`
 
 LongCache ships with `py.typed`. All public entry points (`LongCache`, `CacheConfig`, `RequestScope`, `RequestContext`, decisions, decorators, backends) now export complete static type signatures compatible with strict `mypy` and IDE autocompletion.
+

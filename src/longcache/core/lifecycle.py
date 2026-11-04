@@ -7,6 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from functools import wraps
+import inspect
 import threading
 import time
 from typing import Any, Callable, Generator, TypeVar, cast
@@ -144,7 +145,11 @@ class Lifecycle:
                     raise CacheClosedError("Queued cache operation was cancelled")
                 call_kwargs = dict(kwargs)
                 if "_cancel" not in call_kwargs:
-                    call_kwargs["_cancel"] = token
+                    try:
+                        if "_cancel" in inspect.signature(function).parameters:
+                            call_kwargs["_cancel"] = token
+                    except (ValueError, TypeError):
+                        pass
                 return function(*args, **call_kwargs)
             finally:
                 self._current.reset(binding)

@@ -21,7 +21,7 @@
 <a href="https://github.com/ENDEVSOLS/LongCache/blob/main/CHANGELOG.md"><strong>Changelog</strong></a>
 </p>
 
-**LongCache** reuses stored responses when trusted scope, execution context, response admission, and verification permit reuse. Python 3.11 and 3.12 are tested; v0.1.1 remains the Python 3.10-compatible line. Measure response quality, latency, and savings on your own workload.
+**LongCache** reuses stored responses when trusted scope, execution context, response admission, and verification permit reuse. Python 3.11 and 3.12 are tested; v0.1.1 remains the Python 3.10-compatible line. See the [Support Matrix](docs/support-matrix.md) and [Upgrading to v0.5](docs/migration-v0.5.md). Measure response quality, latency, and savings on your own workload.
 
 
 ---
@@ -58,7 +58,7 @@ uv pip install longcache[redis]
 uv pip install longcache[all]
 ```
 
-To try the development line (v0.4 features on the `0.4.0` package version), check out
+To try the development line (v0.5 features on the `0.5.0` package version), check out
 the development branch and install from the repository directory containing `pyproject.toml`:
 
 ```bash
@@ -191,10 +191,6 @@ config = CacheConfig(
     hnsw_m=32,  # HNSW connections per node
     hnsw_ef_search=64,  # HNSW search depth
     scope_policy="private",  # Trusted tenant + user required; sharing is explicit
-    # Legacy execution fields below do not replace RequestContext
-    model="",  # LLM model identifier (e.g. "gpt-4o")
-    system_prompt="",  # System prompt string
-    temperature=-1.0,  # Sampling temperature (-1.0 = unset)
 )
 
 cache = LongCache(config, context=context)
@@ -219,7 +215,6 @@ export LONGCACHE_SIMILARITY_THRESHOLD=0.90
 export LONGCACHE_BACKEND=redis
 export LONGCACHE_TTL_SECONDS=7200
 export LONGCACHE_REDIS_URL=redis://prod-redis:6379/0
-export LONGCACHE_MODEL=gpt-4o
 ```
 
 ```python
@@ -656,9 +651,6 @@ Process hit/miss counters reset on restart; stored entry hit counts persist. Sco
 | `scope_policy`                      | `str`   | `"private"`                  | Trusted tenant/user scope; `tenant_shared` and `public` require explicit opt-in |
 | `cache_id`, `generation`          | `str`   | `"default"`                  | Owned Redis keyspace and storage generation (shared limits are bound to it)         |
 | `verification_budget`               | `int`   | `8`                          | Maximum candidates checked per lookup                                               |
-| `model`                             | `str`   | `""`                         | Legacy execution field; does not replace trusted context                            |
-| `system_prompt`                     | `str`   | `""`                         | Global system prompt for composite key scoping                                      |
-| `temperature`                       | `float` | `-1.0`                       | Global temperature for composite key scoping (`-1.0` = unset)                     |
 
 ---
 
@@ -666,20 +658,18 @@ Process hit/miss counters reset on restart; stored entry hit counts persist. Sco
 
 Used internally by backends and available through scoped `entries(context=...)`. `inspect()` returns a redacted decision dictionary, not a `CacheEntry`.
 
-| Field             | Type             | Description                                          |
-| ----------------- | ---------------- | ---------------------------------------------------- |
-| `id`            | `int \| None`   | Backend-assigned unique identifier                   |
-| `namespace`     | `str`          | Canonical scoped execution partition                 |
-| `query`         | `str`          | Original query text                                  |
-| `vector`        | `np.ndarray`   | Configured-dimension L2-normalized float32 embedding |
-| `response`      | `Any`          | Cached LLM response (must be JSON-serializable)      |
-| `created_at`    | `float`        | Unix timestamp of entry creation                     |
-| `expires_at`    | `float \| None` | Unix timestamp of expiry (`None` = no expiry)      |
-| `hit_count`     | `int`          | Number of times this entry has been served           |
-| `model`         | `str`          | Model identifier at write time                       |
-| `system_prompt` | `str`          | System prompt at write time                          |
-| `temperature`   | `float`        | Temperature at write time (`-1.0` = unset)         |
-| `tags`          | `list[str]`    | Tags for selective invalidation                      |
+| Field           | Type             | Description                                          |
+| --------------- | ---------------- | ---------------------------------------------------- |
+| `id`            | `int \| None`    | Backend-assigned unique identifier                   |
+| `namespace`     | `str`            | Canonical scoped execution partition                 |
+| `query`         | `str`            | Original query text                                  |
+| `vector`        | `np.ndarray`     | Configured-dimension L2-normalized float32 embedding |
+| `response`      | `Any`            | Cached LLM response (must be JSON-serializable)      |
+| `created_at`    | `float`          | Unix timestamp of entry creation                     |
+| `expires_at`    | `float \| None`  | Unix timestamp of expiry (`None` = no expiry)        |
+| `hit_count`     | `int`            | Number of times this entry has been served           |
+| `tags`          | `list[str]`      | Tags for selective invalidation                      |
+| `metadata`      | `dict[str, Any]` | Format-2 identity, embedding, and payload digests    |
 
 ---
 
@@ -747,7 +737,7 @@ decision = cache.inspect("refund policy", context=context)
 
 ### Custom Integration: Decision-Based Control
 
-Hit accounting is automatic; `record_hit` and `record_miss` were removed in v0.2. The legacy `track_miss` argument remains accepted by `get`/`aget` but does not control accounting.
+Hit accounting is automatic; `record_hit` and `record_miss` were removed in v0.2, and the legacy `track_miss` parameter was removed in v0.5.0.
 
 ```python
 def answer(query):

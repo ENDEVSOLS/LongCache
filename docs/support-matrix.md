@@ -80,3 +80,4 @@ Compatibility shims designed for drop-in interoperability with third-party frame
 
 Starting with **v0.5.0**, LongCache is fully typed according to PEP 561 and includes the `src/longcache/py.typed` marker file.
 Every public function, method, and protocol is checked under strict type checking (`mypy --strict`). Consuming applications running `mypy --strict` will receive complete type definitions, generic parameter preservation on `@cache.cached`, and IDE autocompletion for all decisions and configuration options.
+

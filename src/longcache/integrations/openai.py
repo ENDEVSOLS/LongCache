@@ -193,7 +193,7 @@ class CachedChatCompletions:
             )
         query, ctx = prepared
         kwargs = snapshot_request(kwargs, query, ctx)
-        return parent.cache.get_or_compute(
+        return parent.cache._run_compute(
             query,
             lambda: parent._client.chat.completions.create(**kwargs),
             namespace=parent._namespace,
@@ -222,7 +222,7 @@ class CachedChatCompletions:
             )
         query, ctx = prepared
         kwargs = snapshot_request(kwargs, query, ctx)
-        return await parent.cache.aget_or_compute(
+        return await parent.cache._arun_compute(
             query,
             lambda: call(**kwargs),
             namespace=parent._namespace,

@@ -42,9 +42,6 @@ class CacheEntry:
     created_at: float = field(default_factory=time.time)
     expires_at: float | None = None
     hit_count: int = 0
-    model: str = ""
-    system_prompt: str = ""
-    temperature: float = -1.0
     tags: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -83,9 +80,6 @@ class CacheEntry:
             "created_at": self.created_at,
             "expires_at": self.expires_at,
             "hit_count": self.hit_count,
-            "model": self.model,
-            "system_prompt": self.system_prompt,
-            "temperature": self.temperature,
             "tags": list(self.tags or []),
             "metadata": self.metadata,
         }
@@ -96,7 +90,8 @@ class CacheEntry:
         Deserialize a cache entry from a dictionary.
 
         The vector field is converted from bytes back to a numpy array
-        if vector_dim is provided.
+        if vector_dim is provided. Legacy v0.1-v0.4 fields (model, system_prompt,
+        temperature) are ignored gracefully if present in persisted payloads.
 
         Args:
             data: Dictionary with cache entry fields.
@@ -129,9 +124,6 @@ class CacheEntry:
         raw_hits = data.get("hit_count")
         hit_count = int(raw_hits) if raw_hits is not None else 0
 
-        raw_temp = data.get("temperature")
-        temperature = float(raw_temp) if raw_temp not in (None, "") else -1.0
-
         raw_meta = data.get("metadata")
         metadata = dict(raw_meta) if isinstance(raw_meta, Mapping) else {}
 
@@ -147,9 +139,6 @@ class CacheEntry:
             created_at=created_at,
             expires_at=expires_at,
             hit_count=hit_count,
-            model=str(data.get("model", "")),
-            system_prompt=str(data.get("system_prompt", "")),
-            temperature=temperature,
             tags=tags,
             metadata=metadata,
         )

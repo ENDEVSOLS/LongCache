@@ -12,7 +12,31 @@ from .core.identity import Instruction, RequestContext, RequestScope
 from .core.decision import LookupDecision, StoreDecision, PolicyDecision
 from .core.base_embedder import BaseEmbedder
 from .core.embedding_contract import EmbeddingDescriptor
-from .core.types import PUBLIC_API_STABILITY
+from .core.entry import CacheEntry
+from .core.types import (
+    AdmissionHook,
+    BackendName,
+    CachedCallable,
+    ContextResolver,
+    DeploymentMode,
+    ErrorPolicy,
+    FaissIndexType,
+    Float32Vector,
+    HealthStatus,
+    InspectionReport,
+    InstructionRole,
+    LookupOutcome,
+    MetricsSnapshot,
+    PUBLIC_API_STABILITY,
+    PolicyAction,
+    ResourceSnapshot,
+    ResponseCodec,
+    ScopePolicy,
+    ScopeResolver,
+    StatsSnapshot,
+    StoreOutcome,
+    VerificationHook,
+)
 from .core.errors import (
     CacheError,
     CacheClosedError,
@@ -28,6 +52,7 @@ from .core.errors import (
 )
 
 __all__ = [
+    "__version__",
     "LongCache",
     "CacheConfig",
     "Instruction",
@@ -38,6 +63,28 @@ __all__ = [
     "PolicyDecision",
     "BaseEmbedder",
     "EmbeddingDescriptor",
+    "CacheEntry",
+    "AdmissionHook",
+    "VerificationHook",
+    "ContextResolver",
+    "ScopeResolver",
+    "CachedCallable",
+    "InspectionReport",
+    "StatsSnapshot",
+    "ResourceSnapshot",
+    "MetricsSnapshot",
+    "ScopePolicy",
+    "BackendName",
+    "DeploymentMode",
+    "ErrorPolicy",
+    "FaissIndexType",
+    "InstructionRole",
+    "ResponseCodec",
+    "LookupOutcome",
+    "StoreOutcome",
+    "PolicyAction",
+    "HealthStatus",
+    "Float32Vector",
     "PUBLIC_API_STABILITY",
     "CacheError",
     "CacheClosedError",

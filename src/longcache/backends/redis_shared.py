@@ -369,9 +369,9 @@ class SharedRedisCacheBackend(RedisCacheBackend):
             "created_at": str(entry.created_at),
             "expires_at": str(entry.expires_at) if entry.expires_at is not None else "",
             "hit_count": str(entry.hit_count),
-            "model": entry.model,
-            "system_prompt": entry.system_prompt,
-            "temperature": str(entry.temperature),
+            "model": "",
+            "system_prompt": "",
+            "temperature": "-1.0",
             "tags": json.dumps(list(entry.tags or [])),
             "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
         }

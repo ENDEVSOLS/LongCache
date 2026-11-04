@@ -85,9 +85,9 @@ class AsyncRedisCacheBackend:
                 "created_at": entry.created_at,
                 "expires_at": entry.expires_at or "",
                 "hit_count": entry.hit_count,
-                "model": entry.model,
-                "system_prompt": entry.system_prompt,
-                "temperature": entry.temperature,
+                "model": "",
+                "system_prompt": "",
+                "temperature": -1.0,
                 "tags": json.dumps(list(entry.tags or [])),
                 "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
             }
@@ -154,9 +154,6 @@ class AsyncRedisCacheBackend:
             except Exception:
                 pass
 
-        temp_val = data.get("temperature")
-        temperature = float(temp_val) if temp_val not in (None, "") else -1.0
-
         return CacheEntry(
             id=int(data["id"]),
             namespace=data["namespace"],
@@ -166,9 +163,6 @@ class AsyncRedisCacheBackend:
             created_at=float(data["created_at"]),
             expires_at=expires_at,
             hit_count=int(data.get("hit_count", 0)),
-            model=data.get("model", ""),
-            system_prompt=data.get("system_prompt", ""),
-            temperature=temperature,
             tags=tags,
             metadata=json.loads(data.get("metadata", "{}")),
         )

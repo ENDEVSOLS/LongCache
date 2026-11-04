@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter, OrderedDict
+from collections.abc import Sequence
 from dataclasses import asdict, replace
 from functools import wraps
 import inspect
@@ -29,6 +30,7 @@ from .lifecycle import Lifecycle, managed
 from .observability import Observability
 from .policy import admit, decode_response, verify
 from .reliability import decision_operation, dependency, execution_operation, operational
+from .types import AdmissionHook, CachedCallable, MetricsSnapshot, StatsSnapshot, VerificationHook
 
 T = TypeVar("T")
 F = TypeVar("F", bound=Callable[..., Any])
@@ -42,8 +44,8 @@ class LongCache:
         config: CacheConfig | None = None,
         *,
         embedder: BaseEmbedder | None = None,
-        admit: Callable[..., Any] | None = None,
-        verifier: Callable[..., Any] | None = None,
+        admit: AdmissionHook | None = None,
+        verifier: VerificationHook | None = None,
         context: RequestContext | None = None,
         metadata_only: bool = False,
     ) -> None:
@@ -328,9 +330,8 @@ class LongCache:
         namespace: str | None = None,
         *,
         context: RequestContext | None = None,
-        **kwargs: Any,
     ) -> LookupDecision:
-        return cast(LookupDecision, self._lookup(query, namespace, context=context, **kwargs))
+        return cast(LookupDecision, self._lookup(query, namespace, context=context))
 
     @managed
     @decision_operation("lookup")
@@ -469,9 +470,8 @@ class LongCache:
         namespace: str | None = None,
         *,
         context: RequestContext | None = None,
-        **kwargs: Any,
     ) -> LookupDecision:
-        return await self._async(self.lookup, query, namespace, context=context, **kwargs)
+        return await self._async(self.lookup, query, namespace, context=context)
 
     async def _alookup(
         self,
@@ -500,9 +500,8 @@ class LongCache:
         namespace: str | None = None,
         *,
         context: RequestContext | None = None,
-        **kwargs: Any,
     ) -> Any:
-        return self.lookup(query, namespace, context=context, **kwargs).response
+        return self.lookup(query, namespace, context=context).response
 
     async def aget(
         self,
@@ -510,20 +509,18 @@ class LongCache:
         namespace: str | None = None,
         *,
         context: RequestContext | None = None,
-        **kwargs: Any,
     ) -> Any:
-        return (await self.alookup(query, namespace, context=context, **kwargs)).response
+        return (await self.alookup(query, namespace, context=context)).response
 
     def set(
         self,
         query: str,
         response: Any,
         namespace: str | None = None,
-        *,
         ttl: int | None = None,
-        tags: Any = None,
+        tags: Sequence[str] | None = None,
+        *,
         context: RequestContext | None = None,
-        **kwargs: Any,
     ) -> StoreDecision:
         return cast(
             StoreDecision,
@@ -534,7 +531,6 @@ class LongCache:
                 ttl=ttl,
                 tags=tags,
                 context=context,
-                **kwargs,
             ),
         )
 
@@ -660,11 +656,10 @@ class LongCache:
         query: str,
         response: Any,
         namespace: str | None = None,
-        *,
         ttl: int | None = None,
-        tags: Any = None,
+        tags: Sequence[str] | None = None,
+        *,
         context: RequestContext | None = None,
-        **kwargs: Any,
     ) -> StoreDecision:
         return await self._async(
             self.set,
@@ -674,7 +669,6 @@ class LongCache:
             ttl=ttl,
             tags=tags,
             context=context,
-            **kwargs,
         )
 
     async def _aset(
@@ -707,7 +701,6 @@ class LongCache:
             kwargs["_cancel"] = _cancel
         return await self._async(self._set, query, response, namespace, **kwargs)
 
-    @execution_operation
     def get_or_compute(
         self,
         query: str,
@@ -716,11 +709,31 @@ class LongCache:
         context: RequestContext | None = None,
         namespace: str | None = None,
         ttl: int | None = None,
-        tags: Any = None,
-        **kwargs: Any,
+        tags: Sequence[str] | None = None,
     ) -> T:
         """Reuse a verified answer or coordinate one exact scoped computation."""
-        _entry_point: str = kwargs.pop("_entry_point", "manual")
+        return self._run_compute(
+            query,
+            compute,
+            context=context,
+            namespace=namespace,
+            ttl=ttl,
+            tags=tags,
+            _entry_point="manual",
+        )
+
+    @execution_operation
+    def _run_compute(
+        self,
+        query: str,
+        compute: Callable[[], T],
+        *,
+        context: RequestContext | None = None,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
+        _entry_point: str = "manual",
+    ) -> T:
         if self._distributed_execution is not None:
             return cast(
                 T,
@@ -747,7 +760,6 @@ class LongCache:
             ),
         )
 
-    @execution_operation
     async def aget_or_compute(
         self,
         query: str,
@@ -756,11 +768,31 @@ class LongCache:
         context: RequestContext | None = None,
         namespace: str | None = None,
         ttl: int | None = None,
-        tags: Any = None,
-        **kwargs: Any,
+        tags: Sequence[str] | None = None,
     ) -> T:
         """Async equivalent; followers await without occupying worker threads."""
-        _entry_point: str = kwargs.pop("_entry_point", "manual")
+        return await self._arun_compute(
+            query,
+            compute,
+            context=context,
+            namespace=namespace,
+            ttl=ttl,
+            tags=tags,
+            _entry_point="manual",
+        )
+
+    @execution_operation
+    async def _arun_compute(
+        self,
+        query: str,
+        compute: Callable[[], Awaitable[T]],
+        *,
+        context: RequestContext | None = None,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
+        _entry_point: str = "manual",
+    ) -> T:
         if self._distributed_execution is not None:
             return cast(
                 T,
@@ -794,10 +826,10 @@ class LongCache:
         *,
         namespace: str | None = None,
         ttl: int | None = None,
-        tags: Any = None,
+        tags: Sequence[str] | None = None,
         context: RequestContext | None = None,
         context_resolver: Callable[..., RequestContext | None] | None = None,
-    ) -> Callable[P, R]: ...
+    ) -> CachedCallable[P, R]: ...
 
     @overload
     def cached(
@@ -806,10 +838,10 @@ class LongCache:
         *,
         namespace: str | None = None,
         ttl: int | None = None,
-        tags: Any = None,
+        tags: Sequence[str] | None = None,
         context: RequestContext | None = None,
         context_resolver: Callable[..., RequestContext | None] | None = None,
-    ) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
+    ) -> Callable[[Callable[P, R]], CachedCallable[P, R]]: ...
 
     def cached(
         self,
@@ -817,7 +849,7 @@ class LongCache:
         *,
         namespace: str | None = None,
         ttl: int | None = None,
-        tags: Any = None,
+        tags: Sequence[str] | None = None,
         context: RequestContext | None = None,
         context_resolver: Callable[..., RequestContext | None] | None = None,
     ) -> Any:
@@ -859,7 +891,7 @@ class LongCache:
                         return await self._apass_through(
                             lambda: fn(query), "missing_identity", "decorator"
                         )
-                    return await self.aget_or_compute(
+                    return await self._arun_compute(
                         query,
                         lambda: fn(query),
                         context=ctx,
@@ -881,7 +913,7 @@ class LongCache:
                 ctx = resolve((query,), {})
                 if ctx is None:
                     return self._pass_through(lambda: fn(query), "missing_identity", "decorator")
-                return self.get_or_compute(
+                return self._run_compute(
                     query,
                     lambda: fn(query),
                     context=ctx,
@@ -1058,7 +1090,7 @@ class LongCache:
         context: RequestContext | None = None,
         namespace: str | None = None,
         operator: bool = False,
-    ) -> dict[str, Any]:
+    ) -> StatsSnapshot:
         self._ensure_open()
         with self._mutation_lock:
             if operator:
@@ -1114,21 +1146,30 @@ class LongCache:
             else:
                 delay, failures = 60.0, 0
 
-    def metrics(self, *, operator: bool = False) -> dict[str, Any]:
+    def metrics(self, *, operator: bool = False) -> MetricsSnapshot:
         """Return process-wide redacted measurements without backend I/O."""
         if not operator:
             raise ValueError("Process-wide metrics require operator=True")
+        obs = self._observability.snapshot()
+        life = self._lifecycle.snapshot()
+        reg = self._execution.registry.snapshot()
         return {
-            **self._observability.snapshot(),
+            "enabled": bool(obs["enabled"]),
+            "counters": obs["counters"],
+            "latency": obs["latency"],
             "resources": {
-                **self._lifecycle.snapshot(),
-                **self._execution.registry.snapshot(),
+                "state": str(life["state"]),
+                "active_operations": int(life["active_operations"]),
+                "cache_jobs": int(life["cache_jobs"]),
+                "cleanup_failed": bool(life["cleanup_failed"]),
+                "cleanup_workers": int(life["cleanup_workers"]),
+                "active_flights": int(reg["active_flights"]),
+                "followers": int(reg["followers"]),
+                "retained_replay_bytes": int(reg["retained_replay_bytes"]),
                 "sqlite_connections": int(getattr(self.backend, "_connection", None) is not None),
             },
             "health": "degraded"
-            if not self._coherent
-            or self._background_failed
-            or self._lifecycle.snapshot()["cleanup_failed"]
+            if not self._coherent or self._background_failed or life["cleanup_failed"]
             else "healthy",
         }
 
