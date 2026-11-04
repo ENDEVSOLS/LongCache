@@ -7,11 +7,15 @@ for TTL, namespace isolation, and hit tracking.
 
 from __future__ import annotations
 
-import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Optional
+import time
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .types import Float32Vector
 
 
 @dataclass
@@ -30,19 +34,19 @@ class CacheEntry:
         hit_count: Number of times this entry has been served from cache.
     """
 
-    id: Optional[int] = None
+    id: int | None = None
     namespace: str = "default"
     query: str = ""
-    vector: Optional[np.ndarray] = None
+    vector: Float32Vector | None = None
     response: Any = None
     created_at: float = field(default_factory=time.time)
-    expires_at: Optional[float] = None
+    expires_at: float | None = None
     hit_count: int = 0
     model: str = ""
     system_prompt: str = ""
     temperature: float = -1.0
     tags: list[str] = field(default_factory=list)
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def is_expired(self) -> bool:
         """
@@ -60,7 +64,7 @@ class CacheEntry:
         """Increment the hit count for this cache entry."""
         self.hit_count += 1
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """
         Serialize the cache entry to a dictionary.
 
@@ -87,7 +91,7 @@ class CacheEntry:
         }
 
     @classmethod
-    def from_dict(cls, data: dict, vector_dim: Optional[int] = None) -> CacheEntry:
+    def from_dict(cls, data: Mapping[str, Any], vector_dim: int | None = None) -> CacheEntry:
         """
         Deserialize a cache entry from a dictionary.
 
@@ -103,23 +107,49 @@ class CacheEntry:
             CacheEntry instance.
         """
         vector = data.get("vector")
+        parsed_vector: Float32Vector | None = None
         if isinstance(vector, bytes) and vector_dim is not None:
-            vector = np.frombuffer(vector, dtype=np.float32).copy()
-            if vector_dim and len(vector) != vector_dim:
-                vector = vector.reshape(vector_dim) if vector.size == vector_dim else vector
+            buf = np.frombuffer(vector, dtype=np.float32).copy()
+            if vector_dim and len(buf) != vector_dim:
+                parsed_vector = buf.reshape(vector_dim) if buf.size == vector_dim else buf
+            else:
+                parsed_vector = buf
+        elif isinstance(vector, np.ndarray) and vector.dtype == np.float32:
+            parsed_vector = vector
+
+        raw_id = data.get("id")
+        entry_id = int(raw_id) if raw_id is not None else None
+
+        raw_created = data.get("created_at")
+        created_at = float(raw_created) if raw_created is not None else time.time()
+
+        raw_expires = data.get("expires_at")
+        expires_at = float(raw_expires) if raw_expires not in (None, "") else None
+
+        raw_hits = data.get("hit_count")
+        hit_count = int(raw_hits) if raw_hits is not None else 0
+
+        raw_temp = data.get("temperature")
+        temperature = float(raw_temp) if raw_temp not in (None, "") else -1.0
+
+        raw_meta = data.get("metadata")
+        metadata = dict(raw_meta) if isinstance(raw_meta, Mapping) else {}
+
+        raw_tags = data.get("tags")
+        tags = [str(t) for t in raw_tags] if isinstance(raw_tags, (list, tuple)) else []
 
         return cls(
-            id=data.get("id"),
-            namespace=data.get("namespace", "default"),
-            query=data.get("query", ""),
-            vector=vector,
+            id=entry_id,
+            namespace=str(data.get("namespace", "default")),
+            query=str(data.get("query", "")),
+            vector=parsed_vector,
             response=data.get("response"),
-            created_at=data.get("created_at", time.time()),
-            expires_at=data.get("expires_at"),
-            hit_count=data.get("hit_count", 0),
-            model=data.get("model", ""),
-            system_prompt=data.get("system_prompt", ""),
-            temperature=float(data.get("temperature", -1.0)),
-            tags=list(data.get("tags") or []),
-            metadata=data.get("metadata") or {},
+            created_at=created_at,
+            expires_at=expires_at,
+            hit_count=hit_count,
+            model=str(data.get("model", "")),
+            system_prompt=str(data.get("system_prompt", "")),
+            temperature=temperature,
+            tags=tags,
+            metadata=metadata,
         )

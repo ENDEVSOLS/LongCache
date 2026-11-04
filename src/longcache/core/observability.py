@@ -1,10 +1,13 @@
 """Bounded in-process measurements and payload-free standard logging."""
 
+from __future__ import annotations
+
 from collections import Counter
 from functools import wraps
 import logging
 import threading
 import time
+from typing import Any, Callable, Mapping, TypeVar, cast
 
 LOGGER = logging.getLogger("longcache")
 LOGGER.addHandler(logging.NullHandler())
@@ -90,28 +93,31 @@ FAMILIES = {
     "observability_drops",
 }
 
+F = TypeVar("F", bound=Callable[..., Any])
 
-def best_effort(function):
+
+def best_effort(function: F) -> F:
     @wraps(function)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
         try:
             return function(*args, **kwargs)
         except Exception:
             return None  # Never recursively report a broken diagnostic path.
 
-    return wrapped
+    return cast(F, wrapped)
 
 
 class Observability:
-    def __init__(self, enabled, backend):
-        self.enabled, self.backend = enabled, backend
+    def __init__(self, enabled: bool, backend: str) -> None:
+        self.enabled = enabled
+        self.backend = backend
         self._lock = threading.Lock()
-        self._counts = Counter()
-        self._histograms = {}
-        self._warnings = {}
+        self._counts: Counter[tuple[str, tuple[tuple[str, str], ...]]] = Counter()
+        self._histograms: dict[tuple[tuple[str, str], ...], list[Any]] = {}
+        self._warnings: dict[tuple[tuple[str, str], ...], float] = {}
 
     @staticmethod
-    def _labels(labels):
+    def _labels(labels: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
         return tuple(
             sorted(
                 (
@@ -128,16 +134,16 @@ class Observability:
         )
 
     @best_effort
-    def count(self, family, **labels):
+    def count(self, family: str, **labels: Any) -> None:
         if not self.enabled or family not in FAMILIES:
             return
-        key = family, self._labels(labels)
+        key = (family, self._labels(labels))
         with self._lock:
             if key in self._counts or len(self._counts) + len(self._histograms) < 2000:
                 self._counts[key] += 1
 
     @best_effort
-    def duration(self, stage, seconds, mode="sync"):
+    def duration(self, stage: str, seconds: float, mode: str = "sync") -> None:
         if not self.enabled:
             return
         key = self._labels({"stage": stage, "mode": mode})
@@ -154,7 +160,7 @@ class Observability:
                     histogram[2][index] += 1
 
     @best_effort
-    def event(self, *, warning=False, **labels):
+    def event(self, *, warning: bool = False, **labels: Any) -> None:
         safe = dict(self._labels(labels))
         now = time.monotonic()
         if warning:
@@ -174,7 +180,7 @@ class Observability:
         except Exception:
             self.count("observability_drops")
 
-    def snapshot(self):
+    def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {
                 "enabled": self.enabled,

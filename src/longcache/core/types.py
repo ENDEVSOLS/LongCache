@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from typing import Any, Literal, Protocol, TypeAlias, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, TypedDict, TypeVar
 import numpy as np
 import numpy.typing as npt
 
-from .decision import PolicyDecision
-from .identity import RequestContext, RequestScope
+if TYPE_CHECKING:
+    from .decision import PolicyDecision
+    from .identity import RequestContext, RequestScope
 
 T = TypeVar("T")
 

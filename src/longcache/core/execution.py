@@ -1,31 +1,37 @@
 """One exact-scoped execution protocol for manual, decorator and provider adapters."""
 
+from __future__ import annotations
+
 import asyncio
 from concurrent.futures import TimeoutError as FutureTimeout
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 import inspect
 import json
-import time
 import threading
+import time
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from .decision import LookupDecision
 from .errors import (
     CacheClosedError,
     CacheOperationError,
+    SingleflightInvalidatedError,
     SingleflightLeaderError,
     SingleflightReentrancyError,
     SingleflightTimeoutError,
-    SingleflightInvalidatedError,
 )
-from .identity import digest, canonical
+from .identity import canonical, digest
 from .policy import admit, decode_response, verify
 from .singleflight import Completion, Flight, Singleflight
+
+if TYPE_CHECKING:
+    from longcache.core.cache import LongCache
 
 
 @dataclass
 class Start:
-    prepared: tuple | None
+    prepared: tuple[Any, ...] | None
     decision: LookupDecision | None
     flight: Flight | None
     leader: bool
@@ -36,27 +42,29 @@ class Start:
     _detach_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @property
-    def role(self):
+    def role(self) -> str:
         return "none" if self.flight is None else "leader" if self.leader else "follower"
 
 
 class Execution:
-    def __init__(self, cache):
+    def __init__(self, cache: LongCache) -> None:
         self.cache = cache
         self.registry = Singleflight(cache.config)
-        self._owned = ContextVar(f"longcache_flight_owner_{id(self)}", default=())
+        self._owned: ContextVar[tuple[Any, ...]] = ContextVar(
+            f"longcache_flight_owner_{id(self)}", default=()
+        )
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         self.registry.abort(shutdown=True)
 
-    def detach(self, state):
+    def detach(self, state: Start) -> None:
         with state._detach_lock:
             if state.flight is not None and not state.leader and not state.detached:
                 state.detached = True
                 self.registry.detach(state.flight)
 
     @staticmethod
-    def options(ttl, tags):
+    def options(ttl: int | None, tags: Any) -> tuple[str, ...]:
         if ttl is not None and (type(ttl) is not int or ttl < 0):
             raise ValueError("TTL must be a nonnegative integer")
         if tags is not None and (
@@ -65,12 +73,24 @@ class Execution:
             raise ValueError("Tags must be strings")
         return tuple(sorted(set(tags or ())))
 
-    def lookup(self, query, context, namespace, *, _cancel=None):
-        return self.cache.lookup(
-            query, namespace, context=context, _record=False, _internal=True, _cancel=_cancel
+    def lookup(
+        self, query: str, context: Any, namespace: str | None, *, _cancel: Any = None
+    ) -> LookupDecision:
+        return cast(
+            LookupDecision,
+            self.cache._lookup(
+                query, namespace, context=context, _record=False, _internal=True, _cancel=_cancel
+            ),
         )
 
-    async def afast_start(self, query, context, namespace, ttl, tags):
+    async def afast_start(
+        self,
+        query: str,
+        context: Any,
+        namespace: str | None,
+        ttl: int | None,
+        tags: tuple[str, ...],
+    ) -> Start:
         """Join before lookup when identity is initialized; only the leader searches.
 
         Pure identity work and the short registry lock are safe on the loop. The
@@ -80,7 +100,7 @@ class Execution:
         cache = self.cache
         if not cache._ready or not cache._coherent or not cache.config.singleflight_enabled:
             return await self.astart(query, context, namespace, ttl, tags)
-        prepared, reason = cache._prepare(query, context, namespace, {}, _initialize=False)
+        prepared, reason = cache._prepare(query, context, namespace, _initialize=False)
         if prepared is None:
             return Start(None, None, None, False, cache._epoch, reason=reason)
         ctx = prepared[0]
@@ -117,10 +137,19 @@ class Execution:
                 self._owned.reset(owner)
         return state
 
-    def start(self, query, context, namespace, ttl, tags, *, _cancel=None):
+    def start(
+        self,
+        query: str,
+        context: Any,
+        namespace: str | None,
+        ttl: int | None,
+        tags: tuple[str, ...],
+        *,
+        _cancel: Any = None,
+    ) -> Start:
         cache = self.cache
         try:
-            prepared, reason = cache._prepare(query, context, namespace, {})
+            prepared, reason = cache._prepare(query, context, namespace)
         except CacheOperationError:
             if cache.config.cache_error_policy != "bypass":
                 raise
@@ -174,7 +203,7 @@ class Execution:
             if owner is not None:
                 self._owned.reset(owner)
 
-    async def astart(self, *args):
+    async def astart(self, *args: Any) -> Start:
         future, token = self.cache._lifecycle.submit(self.start, *args)
         bridge = asyncio.wrap_future(future)
         bridge.add_done_callback(lambda result: None if result.cancelled() else result.exception())
@@ -185,7 +214,7 @@ class Execution:
 
             # Cancellation can arrive after election but before the await receives
             # its result. Release that ownership even when the caller never saw it.
-            def abandon(result):
+            def abandon(result: Any) -> None:
                 if not result.cancelled() and result.exception() is None:
                     state = result.result()
                     if state.flight is not None:
@@ -199,18 +228,18 @@ class Execution:
 
     def finish(
         self,
-        prepared,
-        decision,
-        response,
-        source,
-        mode,
-        role,
-        entry_point,
-        epoch,
+        prepared: Any,
+        decision: Any,
+        response: Any,
+        source: str,
+        mode: str,
+        role: str,
+        entry_point: str,
+        epoch: int,
         *,
-        reason=None,
-        _cancel=None,
-    ):
+        reason: str | None = None,
+        _cancel: Any = None,
+    ) -> Any:
         cache = self.cache
         with cache._mutation_lock:
             cache._ensure_open()
@@ -284,10 +313,12 @@ class Execution:
         )
         return response
 
-    async def afinish(self, *args, **kwargs):
+    async def afinish(self, *args: Any, **kwargs: Any) -> Any:
         return await self.cache._lifecycle.call(self.finish, *args, **kwargs)
 
-    def envelope(self, result, context, expires_at, entry_id):
+    def envelope(
+        self, result: Any, context: Any, expires_at: float | None, entry_id: int | None
+    ) -> Completion:
         payload, admission = self.cache._dependency(
             "admission", admit, result, context, self.cache._admit
         )
@@ -298,9 +329,17 @@ class Execution:
             return Completion("non_shareable")
         return Completion("value", encoded, expires_at=expires_at, entry_id=entry_id)
 
-    def replay(self, completion, query, context, prepared, *, _cancel=None):
+    def replay(
+        self,
+        completion: Completion,
+        query: str,
+        context: Any,
+        prepared: Any,
+        *,
+        _cancel: Any = None,
+    ) -> tuple[Any, bool, LookupDecision | None]:
         if completion.kind == "invalidated":
-            raise type(completion.error)(str(completion.error))
+            raise type(completion.error)(str(completion.error)) if completion.error else SingleflightInvalidatedError()
         if completion.kind == "error":
             raise SingleflightLeaderError(
                 "Shared execution failed or its leader was cancelled"
@@ -311,6 +350,8 @@ class Execution:
             and completion.expires_at is not None
             and time.time() >= completion.expires_at
         ):
+            return None, False, None
+        if completion.payload is None:
             return None, False, None
         response = decode_response(json.loads(completion.payload), context.codec)
         payload, admission = cache._dependency("admission", admit, response, context, cache._admit)
@@ -385,7 +426,15 @@ class Execution:
             return None, False, None
         return response, True, decision
 
-    def publish(self, flight, result, context, epoch, expires_at=None, entry_id=None):
+    def publish(
+        self,
+        flight: Flight,
+        result: Any,
+        context: Any,
+        epoch: int,
+        expires_at: float | None = None,
+        entry_id: int | None = None,
+    ) -> None:
         completion = self.envelope(result, context, expires_at, entry_id)
         with self.cache._mutation_lock:
             if epoch != self.cache._epoch:
@@ -395,9 +444,9 @@ class Execution:
                 )
             self.registry.complete(flight, completion)
 
-    def cached(self, state, mode, entry_point, *, _cancel=None):
+    def cached(self, state: Start, mode: str, entry_point: str, *, _cancel: Any = None) -> Any:
         try:
-            if state.flight is not None and state.leader:
+            if state.flight is not None and state.leader and state.decision is not None and state.prepared is not None:
                 self.publish(
                     state.flight,
                     state.decision.response,
@@ -409,7 +458,7 @@ class Execution:
             return self.finish(
                 state.prepared,
                 state.decision,
-                state.decision.response,
+                state.decision.response if state.decision else None,
                 "cache",
                 mode,
                 state.role,
@@ -425,15 +474,25 @@ class Execution:
             if state.flight is not None and not state.leader:
                 self.detach(state)
 
-    def store(self, state, query, result, namespace, ttl, tags, *, _cancel=None):
+    def store(
+        self,
+        state: Start,
+        query: str,
+        result: Any,
+        namespace: str | None,
+        ttl: int | None,
+        tags: Any,
+        *,
+        _cancel: Any = None,
+    ) -> Any:
         cache = self.cache
         effective_ttl = cache.config.ttl_seconds if ttl is None else ttl
         expiry = time.time() + effective_ttl if effective_ttl else None
-        stored = cache.set(
+        stored = cache._set(
             query,
             result,
             namespace,
-            context=state.prepared[0],
+            context=state.prepared[0] if state.prepared else None,
             ttl=ttl,
             tags=tags,
             _expected_epoch=state.epoch,
@@ -441,7 +500,7 @@ class Execution:
             _internal=True,
             _cancel=_cancel,
         )
-        if state.flight is not None and state.leader:
+        if state.flight is not None and state.leader and state.prepared is not None:
             if stored.outcome == "REJECTED" and (
                 cache.config.deployment_mode == "shared"
                 or stored.reason not in ("cache_unavailable", "invalidated")
@@ -453,7 +512,7 @@ class Execution:
                 )
         return result
 
-    def origin(self, compute):
+    def origin(self, compute: Callable[[], Any]) -> Any:
         self.cache._observability.count("origin_executions")
         started = time.monotonic()
         try:
@@ -469,7 +528,7 @@ class Execution:
         finally:
             self.cache._observability.duration("origin", time.monotonic() - started)
 
-    async def aorigin(self, compute):
+    async def aorigin(self, compute: Callable[[], Any]) -> Any:
         self.cache._observability.count("origin_executions")
         started = time.monotonic()
         try:
@@ -483,11 +542,22 @@ class Execution:
         finally:
             self.cache._observability.duration("origin", time.monotonic() - started, "async")
 
-    def follower_result(self, state, completion, query, mode, entry_point, *, _cancel=None):
+    def follower_result(
+        self,
+        state: Start,
+        completion: Completion,
+        query: str,
+        mode: str,
+        entry_point: str,
+        *,
+        _cancel: Any = None,
+    ) -> tuple[Any, bool]:
+        if state.prepared is None:
+            return None, False
         response, accepted, decision = self.replay(
             completion, query, state.prepared[0], state.prepared
         )
-        if not accepted:
+        if not accepted or decision is None:
             return None, False
         source = "cache" if decision.outcome == "HIT" else "coalesced"
         return self.finish(
@@ -504,15 +574,15 @@ class Execution:
 
     def run(
         self,
-        query,
-        compute,
+        query: str,
+        compute: Callable[[], Any],
         *,
-        context=None,
-        namespace=None,
-        ttl=None,
-        tags=None,
-        _entry_point="manual",
-    ):
+        context: Any = None,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
+        _entry_point: str = "manual",
+    ) -> Any:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -525,10 +595,10 @@ class Execution:
             or inspect.iscoroutinefunction(getattr(compute, "__call__", None))
         ):
             raise TypeError("get_or_compute requires a synchronous callable")
-        tags = self.options(ttl, tags)
+        tags_tuple = self.options(ttl, tags)
         cache = self.cache
         with cache._lifecycle.operation():
-            state = self.start(query, context, namespace, ttl, tags)
+            state = self.start(query, context, namespace, ttl, tags_tuple)
             if state.prepared is None:
                 return self.finish(
                     None,
@@ -541,7 +611,7 @@ class Execution:
                     state.epoch,
                     reason=state.reason,
                 )
-            if state.decision.outcome == "HIT":
+            if state.decision is not None and state.decision.outcome == "HIT":
                 return self.cached(state, "sync", _entry_point)
             if state.flight is not None and not state.leader:
                 started = time.monotonic()
@@ -569,7 +639,7 @@ class Execution:
             )
             try:
                 result = self.origin(compute)
-                self.store(state, query, result, namespace, ttl, tags)
+                self.store(state, query, result, namespace, ttl, tags_tuple)
                 return self.finish(
                     state.prepared,
                     None,
@@ -590,21 +660,21 @@ class Execution:
 
     async def arun(
         self,
-        query,
-        compute,
+        query: str,
+        compute: Callable[[], Any],
         *,
-        context=None,
-        namespace=None,
-        ttl=None,
-        tags=None,
-        _entry_point="manual",
-    ):
+        context: Any = None,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
+        _entry_point: str = "manual",
+    ) -> Any:
         if not callable(compute):
             raise TypeError("aget_or_compute requires an awaitable-producing callable")
-        tags = self.options(ttl, tags)
+        tags_tuple = self.options(ttl, tags)
         cache = self.cache
         with cache._lifecycle.operation():
-            state = await self.afast_start(query, context, namespace, ttl, tags)
+            state = await self.afast_start(query, context, namespace, ttl, tags_tuple)
             if state.prepared is None:
                 result = await self.aorigin(compute)
                 return await self.afinish(
@@ -618,7 +688,7 @@ class Execution:
                     state.epoch,
                     reason=state.reason,
                 )
-            if state.decision.outcome == "HIT":
+            if state.decision is not None and state.decision.outcome == "HIT":
                 # If cancellation loses this scheduled result, cached() still owns
                 # and releases any elected flight in its worker finally block.
                 try:
@@ -654,7 +724,7 @@ class Execution:
             )
             try:
                 result = await self.aorigin(compute)
-                await cache._lifecycle.call(self.store, state, query, result, namespace, ttl, tags)
+                await cache._lifecycle.call(self.store, state, query, result, namespace, ttl, tags_tuple)
                 return await self.afinish(
                     state.prepared,
                     None,

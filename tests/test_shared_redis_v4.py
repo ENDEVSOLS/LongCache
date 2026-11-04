@@ -71,7 +71,7 @@ def test_empty_store_invalidation_fences_old_writer(pair):
     context = trusted_context()
     old_epoch = first.backend.epoch()
     assert second.invalidate_by_tag("doc", context=context) == 0
-    decision = first.set(
+    decision = first._set(
         "question",
         "old",
         context=context,
@@ -168,7 +168,7 @@ def test_lost_or_recreated_generation_manifest_quarantines_old_process(pair):
 def test_tag_invalidation_fences_write_missing_from_its_pre_read(pair, monkeypatch):
     first, second = pair
     context = trusted_context()
-    prepared, reason = first._prepare("question", context, None, {})
+    prepared, reason = first._prepare("question", context, None)
     assert reason is None
     tag_key = first.backend._tag_key(prepared[1], "doc")
     original = first.backend._client.sscan
@@ -339,8 +339,12 @@ def test_partition_tag_and_per_entry_metadata_limits():
         assert cache.set("two", "answer", context=context, tags=["long"]).reason == "tag_capacity"
         assert cache.set("two", "answer", context=context, tags=["two"]).reason == "capacity"
         assert cache.set("two", "answer", context=other, tags=["one"]).reason == "capacity"
-        _, partition, _ = cache._prepare("maintenance", context, None, {})[0]
-        _, other_partition, _ = cache._prepare("maintenance", other, None, {})[0]
+        res1 = cache._prepare("maintenance", context, None)
+        assert res1[0] is not None
+        _, partition, _ = res1[0]
+        res2 = cache._prepare("maintenance", other, None)
+        assert res2[0] is not None
+        _, other_partition, _ = res2[0]
         with pytest.raises(CacheOperationError, match="metadata_capacity"):
             cache.backend.delete_by_tag("two", partition)
         with pytest.raises(CacheOperationError, match="metadata_capacity"):
@@ -451,12 +455,12 @@ def test_expired_owner_cannot_publish_or_release_new_owner(pair):
     time.sleep(0.05)
     same_key, new_token = second.backend.acquire_flight("lease-race", 5000)
     assert same_key == key and new_token is not None and new_token != old_token
-    old = first.set("question", "old", context=context, _lease_key=key, _lease_token=old_token)
+    old = first._set("question", "old", context=context, _lease_key=key, _lease_token=old_token)
     assert old.outcome == "REJECTED"
     first.backend.release_flight(key, old_token)
     assert second.backend.flight_active(key)
     assert (
-        second.set(
+        second._set(
             "question", "new", context=context, _lease_key=key, _lease_token=new_token
         ).outcome
         == "STORED"

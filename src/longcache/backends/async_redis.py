@@ -11,15 +11,16 @@ index and lifecycle operations.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import time
-import asyncio
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
 from longcache.core.entry import CacheEntry
+from longcache.core.types import Float32Vector
 
 
 class AsyncRedisCacheBackend:
@@ -62,15 +63,15 @@ class AsyncRedisCacheBackend:
     def _namespace_key(self, namespace: str) -> str:
         return f"{self.ROOT}:ns:{namespace}"
 
-    def _vector_to_str(self, vector: np.ndarray) -> str:
+    def _vector_to_str(self, vector: Float32Vector) -> str:
         return base64.b64encode(vector.tobytes()).decode("ascii")
 
-    def _str_to_vector(self, vector_str: str) -> np.ndarray:
+    def _str_to_vector(self, vector_str: str) -> Float32Vector:
         return np.frombuffer(base64.b64decode(vector_str), dtype=np.float32).copy()
 
     async def store(self, entry: CacheEntry) -> int:
         async with self._lock:
-            entry_id = await self._client.incr(self.ID_COUNTER)
+            entry_id = int(await self._client.incr(self.ID_COUNTER))
 
             vector_str = self._vector_to_str(entry.vector) if entry.vector is not None else ""
             response_json = json.dumps(entry.response, allow_nan=False)
@@ -127,7 +128,7 @@ class AsyncRedisCacheBackend:
 
         return entry
 
-    def _data_to_entry(self, data: dict) -> CacheEntry:
+    def _data_to_entry(self, data: dict[str, Any]) -> CacheEntry:
         vector = None
         if data.get("vector"):
             vector = self._str_to_vector(data["vector"])
@@ -238,7 +239,7 @@ class AsyncRedisCacheBackend:
 
     async def count(self, namespace: str) -> int:
         ns_key = self._namespace_key(namespace)
-        return await self._client.scard(ns_key)
+        return int(await self._client.scard(ns_key))
 
     async def list_entries(self, namespace: str) -> list[CacheEntry]:
         ns_key = self._namespace_key(namespace)
@@ -264,14 +265,14 @@ class AsyncRedisCacheBackend:
 
         evicted = 0
         for entry in entries[:count]:
-            if await self.delete(entry.id):
+            if entry.id is not None and await self.delete(entry.id):
                 evicted += 1
 
         return evicted
 
     async def get_expired(self, namespace: str) -> list[int]:
         entries = await self.list_entries(namespace)
-        return [e.id for e in entries if e.is_expired()]
+        return [e.id for e in entries if e.id is not None and e.is_expired()]
 
     async def _enforce_max_entries(self, namespace: str) -> None:
         count = await self.count(namespace)

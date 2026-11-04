@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import threading
 import time
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
 
 from .errors import (
     CacheOperationError,
@@ -15,16 +16,20 @@ from .errors import (
 )
 from .identity import digest
 
+if TYPE_CHECKING:
+    from longcache.core.cache import LongCache
+    from longcache.core.decision import LookupDecision
+
 
 class _LeaseRenewal:
-    def __init__(self, backend, key: str, token: str, ttl_ms: int, interval: float):
+    def __init__(self, backend: Any, key: str, token: str, ttl_ms: int, interval: float) -> None:
         self.backend, self.key, self.token = backend, key, token
         self.ttl_ms, self.interval = ttl_ms, interval
         self.stop_event = threading.Event()
         self.lost = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True, name="longcache-lease")
 
-    def _run(self):
+    def _run(self) -> None:
         while not self.stop_event.wait(self.interval):
             try:
                 if not self.backend.renew_flight(self.key, self.token, self.ttl_ms):
@@ -34,11 +39,11 @@ class _LeaseRenewal:
                 self.lost.set()
                 return
 
-    def __enter__(self):
+    def __enter__(self) -> _LeaseRenewal:
         self.thread.start()
         return self
 
-    def __exit__(self, *_):
+    def __exit__(self, *_: Any) -> None:
         self.stop_event.set()
         self.thread.join(timeout=2)
 
@@ -46,19 +51,26 @@ class _LeaseRenewal:
 class DistributedExecution:
     """Shares only stored, policy-verified results; leaders own their origin calls."""
 
-    def __init__(self, cache):
+    def __init__(self, cache: LongCache) -> None:
         self.cache = cache
 
     @staticmethod
-    def _invoke(function, *args, _cancel=None):
+    def _invoke(function: Callable[..., Any], *args: Any, _cancel: Any = None) -> Any:
         return function(*args)
 
-    async def _call(self, function, *args):
+    async def _call(self, function: Callable[..., Any], *args: Any) -> Any:
         return await self.cache._lifecycle.call(self._invoke, function, *args)
 
-    def _prepare(self, query, context, namespace, ttl, tags):
+    def _prepare(
+        self,
+        query: str,
+        context: Any,
+        namespace: str | None,
+        ttl: int | None,
+        tags: Any,
+    ) -> tuple[Any, str | None, int | None, str | None]:
         cache = self.cache
-        prepared, reason = cache._prepare(query, context, namespace, {})
+        prepared, reason = cache._prepare(query, context, namespace)
         if prepared is None:
             return None, reason, None, None
         ctx = prepared[0]
@@ -73,12 +85,22 @@ class DistributedExecution:
         policy = digest({"ttl": cache.config.ttl_seconds if ttl is None else ttl, "tags": tags})
         return prepared, None, shared_epoch, digest({"exact": exact, "policy": policy})
 
-    def _check_epoch(self, expected):
+    def _check_epoch(self, expected: int) -> None:
         actual = self.cache._dependency("backend", self.cache.backend.epoch)
         if actual != expected:
             raise SingleflightInvalidatedError("Shared execution was invalidated")
 
-    def _finish(self, prepared, decision, response, source, mode, role, entry_point, reason=None):
+    def _finish(
+        self,
+        prepared: Any,
+        decision: Any,
+        response: Any,
+        source: str,
+        mode: str,
+        role: str,
+        entry_point: str,
+        reason: str | None = None,
+    ) -> Any:
         return self.cache._execution.finish(
             prepared,
             decision,
@@ -91,15 +113,28 @@ class DistributedExecution:
             reason=reason,
         )
 
-    def _lookup(self, query, ctx, namespace):
-        return self.cache.lookup(query, namespace, context=ctx, _record=False, _internal=True)
+    def _lookup(self, query: str, ctx: Any, namespace: str | None) -> LookupDecision:
+        return cast(
+            LookupDecision,
+            self.cache._lookup(query, namespace, context=ctx, _record=False, _internal=True),
+        )
 
-    async def _alookup(self, query, ctx, namespace):
-        return await self.cache.alookup(
+    async def _alookup(self, query: str, ctx: Any, namespace: str | None) -> LookupDecision:
+        return await self.cache._alookup(
             query, namespace, context=ctx, _record=False, _internal=True
         )
 
-    def run(self, query, compute, *, context, namespace, ttl, tags, entry_point):
+    def run(
+        self,
+        query: str,
+        compute: Callable[[], Any],
+        *,
+        context: Any,
+        namespace: str | None,
+        ttl: int | None,
+        tags: Any,
+        entry_point: str,
+    ) -> Any:
         try:
             return self._run(
                 query,
@@ -125,7 +160,17 @@ class DistributedExecution:
                     "cache_unavailable",
                 )
 
-    def _run(self, query, compute, *, context, namespace, ttl, tags, entry_point):
+    def _run(
+        self,
+        query: str,
+        compute: Callable[[], Any],
+        *,
+        context: Any,
+        namespace: str | None,
+        ttl: int | None,
+        tags: Any,
+        entry_point: str,
+    ) -> Any:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
@@ -171,13 +216,15 @@ class DistributedExecution:
                 )
             deadline = time.monotonic() + cache.config.singleflight_wait_timeout_seconds
             while True:
-                self._check_epoch(shared_epoch)
+                if shared_epoch is not None:
+                    self._check_epoch(shared_epoch)
                 key, token = cache._dependency(
                     "backend", cache.backend.acquire_flight, flight_key, lease_ms
                 )
                 if token is not None:
                     try:
-                        self._check_epoch(shared_epoch)
+                        if shared_epoch is not None:
+                            self._check_epoch(shared_epoch)
                         decision = self._lookup(query, ctx, namespace)
                         if decision.outcome == "HIT":
                             return self._finish(
@@ -209,7 +256,7 @@ class DistributedExecution:
                         ) as renewal:
                             result = cache._execution.origin(compute)
                             if not renewal.lost.is_set():
-                                stored = cache.set(
+                                stored = cache._set(
                                     query,
                                     result,
                                     namespace,
@@ -247,7 +294,8 @@ class DistributedExecution:
                         except CacheOperationError:
                             pass  # The bounded lease expires; never repeat a completed origin.
                 while time.monotonic() < deadline:
-                    self._check_epoch(shared_epoch)
+                    if shared_epoch is not None:
+                        self._check_epoch(shared_epoch)
                     decision = self._lookup(query, ctx, namespace)
                     if decision.outcome == "HIT":
                         return self._finish(
@@ -289,7 +337,17 @@ class DistributedExecution:
                 else:
                     raise SingleflightTimeoutError("Timed out waiting for shared execution")
 
-    async def arun(self, query, compute, *, context, namespace, ttl, tags, entry_point):
+    async def arun(
+        self,
+        query: str,
+        compute: Callable[[], Awaitable[Any]],
+        *,
+        context: Any,
+        namespace: str | None,
+        ttl: int | None,
+        tags: Any,
+        entry_point: str,
+    ) -> Any:
         try:
             return await self._arun(
                 query,
@@ -317,7 +375,17 @@ class DistributedExecution:
                     "cache_unavailable",
                 )
 
-    async def _arun(self, query, compute, *, context, namespace, ttl, tags, entry_point):
+    async def _arun(
+        self,
+        query: str,
+        compute: Callable[[], Awaitable[Any]],
+        *,
+        context: Any,
+        namespace: str | None,
+        ttl: int | None,
+        tags: Any,
+        entry_point: str,
+    ) -> Any:
         if not callable(compute):
             raise TypeError("aget_or_compute requires an awaitable-producing callable")
         cache = self.cache
@@ -333,7 +401,7 @@ class DistributedExecution:
                     self._finish, None, None, result, "origin", "async", "none", entry_point, reason
                 )
             ctx = prepared[0]
-            decision = await self._alookup(query, ctx, namespace)
+            decision: LookupDecision = await self._alookup(query, ctx, namespace)
             if decision.outcome == "HIT":
                 return await self._call(
                     self._finish,
@@ -360,11 +428,13 @@ class DistributedExecution:
                 )
             deadline = time.monotonic() + cache.config.singleflight_wait_timeout_seconds
             while True:
-                await self._call(self._check_epoch, shared_epoch)
+                if shared_epoch is not None:
+                    await self._call(self._check_epoch, shared_epoch)
                 key, token = await self._call(cache.backend.acquire_flight, flight_key, lease_ms)
                 if token is not None:
                     try:
-                        await self._call(self._check_epoch, shared_epoch)
+                        if shared_epoch is not None:
+                            await self._call(self._check_epoch, shared_epoch)
                         decision = await self._alookup(query, ctx, namespace)
                         if decision.outcome == "HIT":
                             return await self._call(
@@ -399,7 +469,7 @@ class DistributedExecution:
                         ) as renewal:
                             result = await cache._execution.aorigin(compute)
                             if not renewal.lost.is_set():
-                                stored = await cache.aset(
+                                stored = await cache._aset(
                                     query,
                                     result,
                                     namespace,
@@ -445,7 +515,8 @@ class DistributedExecution:
                         except CacheOperationError:
                             pass  # A lost release is bounded by the Redis TTL.
                 while time.monotonic() < deadline:
-                    await self._call(self._check_epoch, shared_epoch)
+                    if shared_epoch is not None:
+                        await self._call(self._check_epoch, shared_epoch)
                     decision = await self._alookup(query, ctx, namespace)
                     if decision.outcome == "HIT":
                         return await self._call(

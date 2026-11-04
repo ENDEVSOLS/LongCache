@@ -1,11 +1,17 @@
 """Per-instance exact-request coordination; completion objects work across threads/loops."""
 
+from __future__ import annotations
+
+import asyncio
 from concurrent.futures import Future
 from dataclasses import dataclass, field
-import asyncio
 import threading
+from typing import TYPE_CHECKING, Any
 
-from .errors import SingleflightCapacityError, SingleflightInvalidatedError, CacheClosedError
+from .errors import CacheClosedError, SingleflightCapacityError, SingleflightInvalidatedError
+
+if TYPE_CHECKING:
+    from longcache.config import CacheConfig
 
 
 @dataclass(frozen=True)
@@ -19,17 +25,19 @@ class Completion:
 
 @dataclass(eq=False)
 class Flight:
-    key: tuple = field(repr=False)
-    future: Future = field(default_factory=Future, repr=False)
+    key: tuple[Any, ...] = field(repr=False)
+    future: Future[Completion] = field(default_factory=Future, repr=False)
     followers: int = 0
     retained_bytes: int = 0
-    async_waiters: dict = field(default_factory=dict, repr=False)
+    async_waiters: dict[asyncio.Future[Completion], asyncio.AbstractEventLoop] = field(
+        default_factory=dict, repr=False
+    )
 
 
 class Singleflight:
-    def __init__(self, config):
+    def __init__(self, config: CacheConfig) -> None:
         self._lock = threading.Lock()
-        self._flights = {}
+        self._flights: dict[tuple[Any, ...], Flight] = {}
         self._followers = 0
         self._retained = 0
         self.max_inflight = config.singleflight_max_inflight
@@ -38,7 +46,7 @@ class Singleflight:
         self.max_retained = 32 * 1024 * 1024
         self.epoch = 0
 
-    def claim(self, key):
+    def claim(self, key: tuple[Any, ...]) -> tuple[Flight, bool]:
         with self._lock:
             if key[2] != self.epoch:
                 raise SingleflightInvalidatedError(
@@ -57,7 +65,7 @@ class Singleflight:
             self._flights[key] = flight
             return flight, True
 
-    def complete(self, flight, completion):
+    def complete(self, flight: Flight, completion: Completion) -> None:
         with self._lock:
             if flight.future.done():
                 return
@@ -75,8 +83,11 @@ class Singleflight:
         self._notify(waiters, completion)
 
     @staticmethod
-    def _notify(waiters, completion):
-        def deliver(waiter):
+    def _notify(
+        waiters: list[tuple[asyncio.Future[Completion], asyncio.AbstractEventLoop]],
+        completion: Completion,
+    ) -> None:
+        def deliver(waiter: asyncio.Future[Completion]) -> None:
             if not waiter.done():
                 waiter.set_result(completion)
 
@@ -86,12 +97,12 @@ class Singleflight:
             except RuntimeError:
                 pass  # The caller's loop has already closed.
 
-    async def wait(self, flight, timeout):
+    async def wait(self, flight: Flight, timeout: float | None) -> Completion:
         # wrap_future(shared_future) cannot remove its concurrent-future callback
         # on timeout. Explicit detachable subscriptions keep churn bounded even
         # when a leader runs indefinitely. Each local future belongs to one caller.
         loop = asyncio.get_running_loop()
-        waiter = loop.create_future()
+        waiter: asyncio.Future[Completion] = loop.create_future()
         with self._lock:
             if flight.future.done():
                 waiter.set_result(flight.future.result())
@@ -105,7 +116,7 @@ class Singleflight:
             if not waiter.done():
                 waiter.cancel()
 
-    def detach(self, flight):
+    def detach(self, flight: Flight) -> None:
         with self._lock:
             flight.followers -= 1
             self._followers -= 1
@@ -113,7 +124,7 @@ class Singleflight:
                 self._retained -= flight.retained_bytes
                 flight.retained_bytes = 0
 
-    def abort(self, shutdown=False):
+    def abort(self, shutdown: bool = False) -> None:
         error = (
             CacheClosedError("Cache shutdown interrupted shared execution")
             if shutdown
@@ -124,7 +135,9 @@ class Singleflight:
                 self.epoch += 1
             flights = list(self._flights.values())
             self._flights.clear()
-            notifications = []
+            notifications: list[
+                tuple[list[tuple[asyncio.Future[Completion], asyncio.AbstractEventLoop]], Completion]
+            ] = []
             for flight in flights:
                 if not flight.future.done():
                     completion = Completion("invalidated", error=error)
@@ -134,7 +147,7 @@ class Singleflight:
         for waiters, completion in notifications:
             self._notify(waiters, completion)
 
-    def snapshot(self):
+    def snapshot(self) -> dict[str, int]:
         with self._lock:
             return {
                 "active_flights": len(self._flights),

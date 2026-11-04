@@ -139,7 +139,7 @@ class CacheConfig:
             raise ValueError(f"ttl_seconds must be >= 0, got {self.ttl_seconds}")
         if self.max_entries < 1:
             raise ValueError(f"max_entries must be >= 1, got {self.max_entries}")
-        if self.backend == "async_redis":
+        if str(self.backend) == "async_redis":
             raise ValueError(
                 "async_redis is not supported through LongCache; use AsyncRedisCacheBackend directly or configure backend='redis'"
             )

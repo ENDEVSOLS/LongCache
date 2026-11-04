@@ -13,7 +13,7 @@ import os
 import sqlite3
 import threading
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -151,16 +151,19 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             self.close()
             raise
 
-    def read_manifest(self):
+    def read_manifest(self) -> dict[str, Any] | None:
         with self._lock:
             row = (
                 self._get_connection()
                 .execute("SELECT data FROM cache_manifest WHERE id=1")
                 .fetchone()
             )
-            return json.loads(row[0]) if row else None
+            if row is None:
+                return None
+            parsed: Any = json.loads(row[0])
+            return parsed if isinstance(parsed, dict) else None
 
-    def ensure_manifest(self, manifest: dict) -> None:
+    def ensure_manifest(self, manifest: dict[str, Any]) -> None:
         from longcache.core.identity import canonical
 
         encoded = canonical(manifest)
@@ -168,7 +171,8 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             conn.execute(
                 "INSERT OR IGNORE INTO cache_manifest (id, data) VALUES (1, ?)", (encoded,)
             )
-            if conn.execute("SELECT data FROM cache_manifest WHERE id=1").fetchone()[0] != encoded:
+            row = conn.execute("SELECT data FROM cache_manifest WHERE id=1").fetchone()
+            if row is None or row[0] != encoded:
                 raise ValueError("Incompatible embedding or storage generation; use a new store")
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -190,7 +194,7 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                 self._connection.close()
                 self._connection = None
 
-    def _entry_to_row(self, entry: CacheEntry) -> dict:
+    def _entry_to_row(self, entry: CacheEntry) -> dict[str, Any]:
         """Convert a CacheEntry to a row dict for database insertion."""
         vector_bytes = entry.vector.tobytes() if entry.vector is not None else b""
         response_json = json.dumps(entry.response, allow_nan=False)
@@ -209,7 +213,7 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
         }
 
-    def _row_to_entry(self, row) -> CacheEntry:
+    def _row_to_entry(self, row: sqlite3.Row) -> CacheEntry:
         """Convert a database row to a CacheEntry."""
         vector = None
         if row["vector"]:
@@ -277,7 +281,9 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                 """,
                 row,
             )
-            entry_id = cursor.lastrowid
+            if cursor.lastrowid is None:
+                raise RuntimeError("Failed to obtain lastrowid after inserting cache entry")
+            entry_id = int(cursor.lastrowid)
             if entry.tags:
                 tag_rows = [(entry_id, tag) for tag in entry.tags]
                 conn.executemany(
@@ -402,7 +408,8 @@ class SQLiteCacheBackend(AbstractCacheBackend):
         with self._lock:
             conn = self._get_connection()
             conn.execute("DELETE FROM cache_tags")
-            count = conn.execute("SELECT COUNT(*) FROM cache_entries").fetchone()[0]
+            row = conn.execute("SELECT COUNT(*) FROM cache_entries").fetchone()
+            count = int(row[0]) if row else 0
             conn.execute("DELETE FROM cache_entries")
             conn.commit()
             return count
@@ -429,7 +436,7 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                 """,
                 (namespace, now),
             ).fetchone()
-            return row[0]
+            return int(row[0]) if row else 0
 
     def list_entries(self, namespace: str) -> list[CacheEntry]:
         """
@@ -510,7 +517,7 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                 (namespace, count),
             )
             conn.commit()
-            return cursor.rowcount
+            return int(cursor.rowcount)
 
     def get_expired(self, namespace: str) -> list[int]:
         """
@@ -532,9 +539,9 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                 """,
                 (namespace, now),
             ).fetchall()
-            return [row[0] for row in rows]
+            return [int(row[0]) for row in rows]
 
-    def export_all(self) -> list[dict]:
+    def export_all(self) -> list[dict[str, Any]]:
         """
         Export all cache entries as dictionaries.
 
@@ -574,7 +581,7 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                 "DELETE FROM cache_entries WHERE expires_at IS NOT NULL AND expires_at <= ?", (now,)
             )
             conn.commit()
-            return cursor.rowcount
+            return int(cursor.rowcount)
 
     def increment_hits(self) -> None:
         with self._lock:
@@ -592,10 +599,10 @@ class SQLiteCacheBackend(AbstractCacheBackend):
             )
             conn.commit()
 
-    def load_stats(self) -> dict:
+    def load_stats(self) -> dict[str, int]:
         with self._lock:
             rows = self._get_connection().execute("SELECT key, value FROM cache_stats").fetchall()
-            return {row["key"]: row["value"] for row in rows}
+            return {str(row["key"]): int(row["value"]) for row in rows}
 
     def __repr__(self) -> str:
         return f"SQLiteCacheBackend(db_path={self._db_path!r})"
