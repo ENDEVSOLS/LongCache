@@ -52,7 +52,7 @@
 # Core — SQLite backend + FAISS + BGE-small (no external services needed)
 uv pip install longcache
 
-# With LangChain + LangGraph compatibility adapters (pass-through in v0.3)
+# With LangChain + LangGraph compatibility adapters (pass-through in v0.5)
 uv pip install longcache[langchain]
 
 # With Redis response storage (FAISS index remains local to this process)
@@ -247,7 +247,8 @@ cache = LongCache(config, context=context)
 - ✅ **Semantic Similarity Cache:** Finds paraphrase candidates, then checks scope and reuse policy before serving an answer.
 - ✅ **Local Embedding:** BAAI/bge-small-en-v1.5 runs on-device after its first download; latency depends on hardware.
 - ✅ **`@cache.cached` Decorator:** Scoped caching for query-only sync or async functions; additional arguments bypass
-- ✅ **`@cache.cached_stream` Decorator:** Preserves sync/async generator interfaces as pass-through; no cache reads or writes in v0.3
+- ✅ **`@cache.cached_stream` Decorator:** Preserves sync/async generator interfaces as pass-through; no cache reads or writes in v0.5
+- ✅ **PEP 561 Static Typing:** Ships `py.typed`, strict generic `@cached` / `get_or_compute` signatures, typed hook protocols, and `PUBLIC_API_STABILITY` tiers
 - ✅ **Composite Cache Keys:** Full SHA-256 identity includes trusted scope, execution settings, versions, codec, policy, and embedding generation
 - ✅ **Tag-Based Invalidation:** Attach tags to entries at write time; invalidate by tag within the exact scoped execution context
 - ✅ **Per-Entry TTL:** Override TTL per `set()` call or decorator — supports never-expire (`ttl=0`) and short-lived entries
@@ -273,8 +274,8 @@ cache = LongCache(config, context=context)
 - 🧪 **Shared Redis Mode (v0.4, opt-in):** Journal-synchronized local indexes, guarded replay, and distributed singleflight across processes; under qualification
 - ✅ **Async Redis Backend:** Experimental standalone storage interface; unsupported through `LongCache`
 - ✅ **In-Memory Backend:** Zero I/O, ideal for unit tests and CI/CD pipelines
-- ✅ **LangChain Integration:** `CachedLLM` and `CachedChain` compatibility wrappers; pass-through in v0.3
-- ✅ **LangGraph Integration:** `CachedState` compatibility interface; graph state is not cached in v0.3
+- ✅ **LangChain Integration:** `CachedLLM` and `CachedChain` compatibility wrappers; pass-through in v0.5
+- ✅ **LangGraph Integration:** `CachedState` compatibility interface; graph state is not cached in v0.5
 - ✅ **LlamaIndex Integration:** `CachedQueryEngine` preserves the engine interface without caching opaque state
 - ✅ **OpenAI Integration:** Supported single-turn text requests with explicit context; sync/async dict and SDK replay
 - ✅ **FastAPI Middleware:** Bounded supported chat-completion JSON with trusted scope resolution and diagnostic headers
@@ -353,7 +354,7 @@ Shared-mode limits: one Redis authority only. Redis Cluster, Sentinel, failover,
 
 ### Async Redis backend status
 
-`AsyncRedisCacheBackend` can be used and tested as a standalone storage backend. It is not supported through `LongCache` in v0.3.0; selecting `backend="async_redis"` fails immediately. End-to-end async Redis integration is planned for a later release.
+`AsyncRedisCacheBackend` can be used and tested as a standalone storage backend (`experimental` tier in `PUBLIC_API_STABILITY`). It is not supported through `LongCache` in v0.5.0; selecting `backend="async_redis"` fails immediately. End-to-end async Redis integration is planned for a later release.
 
 ### In-Memory (Testing & CI)
 
@@ -371,7 +372,7 @@ cache = LongCache(CacheConfig(backend="memory"))
 
 ## Integrations
 
-**v0.3 support:** generic LangChain, LangGraph, and LlamaIndex adapters below preserve their interfaces but bypass cache reads/writes. Use the explicit-context manual/decorator path for caching proven application workflows. All streaming helpers also pass through.
+**v0.5 support:** generic LangChain, LangGraph, and LlamaIndex adapters below preserve their interfaces as `pass-through` compatibility wrappers (`cache_bypass_reason = "unsupported_request_shape"`). Use the explicit-context manual/decorator path or `CachedOpenAI` / `LongCacheMiddleware` for caching proven application workflows. All streaming helpers also pass through. See the [Support Matrix](docs/support-matrix.md) and [Upgrading to v0.5](docs/migration-v0.5.md).
 
 ### LangChain
 
@@ -478,7 +479,7 @@ with OpenAI(timeout=20.0, max_retries=0) as provider, LongCache() as cache:
     )
 ```
 
-In v0.3.0, OpenAI caching requires a complete trusted context and the supported single-turn text subset. Multi-turn, tool, multimodal, structured-output, streaming, and unknown-parameter requests bypass. Complete responses require `finish_reason="stop"`. For varying identities, pass `cache_context=per_request_context`; namespaces alone do not establish tenant isolation.
+In v0.5.0, OpenAI caching requires a complete trusted context and the supported single-turn text subset. Multi-turn, tool, multimodal, structured-output, streaming, and unknown-parameter requests bypass. Complete responses require `finish_reason="stop"`. For varying identities, pass `cache_context=per_request_context`; namespaces alone do not establish tenant isolation.
 
 ---
 
@@ -531,7 +532,7 @@ adapter = StreamingCacheAdapter(cache, my_stream)
 for token in adapter.stream("What is RAG?"):
     print(token, end="")
 
-# Repeated calls also reach the LLM; streaming replay is unsupported in v0.3
+# Repeated calls also reach the LLM; streaming replay is unsupported in v0.5
 for token in adapter.stream("What is RAG?"):
     print(token, end="")
 ```
@@ -598,7 +599,7 @@ Main facade class. Accepts an optional `CacheConfig` and explicit request contex
 def my_chain(query: str) -> str: ...
 ```
 
-Use a per-call `context_resolver` when trusted identity varies. For matching inspection/invalidation, derive the decorator context with `my_chain.cache_context_for(context)`. Streaming decorators do not cache in v0.3.
+Use a per-call `context_resolver` when trusted identity varies. For matching inspection/invalidation, derive the decorator context with `my_chain.cache_context_for(context)`. Streaming decorators do not cache in v0.5.
 
 #### `stats()` Return Value
 

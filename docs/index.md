@@ -92,17 +92,17 @@ Async applications use `await cache.alookup(...)`, `await cache.aget(...)`, and 
 
 ## Supported integrations
 
-| Path | v0.3 status |
+| Path | v0.5 status |
 | ---- | ----------- |
-| Manual lookup/store | Supported with explicit trusted context; independent origin calls |
-| `get_or_compute` / `aget_or_compute` and query-only decorators | Supported with exact scoped singleflight |
-| OpenAI sync/async chat completions | Supported single-turn text subset with dict/SDK response replay |
-| ASGI middleware | Supported bounded single-turn JSON subset with trusted scope resolution; no HTTP invocation coalescing |
-| Memory, SQLite, synchronous Redis storage | Supported within one cache process |
-| Opt-in Shared Redis mode (`deployment_mode="shared"`) | v0.4 development; multi-process deployment over one Redis authority, release qualification open; see [shared deployment](deployment.md) |
-| Standalone async Redis backend | Experimental storage interface; unsupported through `LongCache` |
-| Generic LangChain, LangGraph, and LlamaIndex adapters | Compatibility pass-through; opaque execution state is not cached |
-| All streaming helpers | Pass-through; no cache reads or writes |
+| Manual lookup/store | Supported (`stable-candidate`) with explicit trusted context; independent origin calls |
+| `get_or_compute` / `aget_or_compute` and query-only decorators | Supported (`stable-candidate`) with exact scoped singleflight |
+| OpenAI sync/async chat completions (`CachedOpenAI`) | Supported (`stable-candidate`) single-turn text subset with dict/SDK response replay |
+| ASGI middleware (`LongCacheMiddleware`) | Supported (`stable-candidate`) bounded single-turn JSON subset with trusted scope resolution; no HTTP invocation coalescing |
+| Memory, SQLite, synchronous Redis storage | Supported (`stable-candidate`) within one cache process |
+| Opt-in Shared Redis mode (`deployment_mode="shared"`) | Experimental (`experimental`); multi-process deployment over one Redis authority, release qualification open; see [shared deployment](deployment.md) |
+| Standalone async Redis backend (`AsyncRedisCacheBackend`) | Experimental (`experimental`) storage interface; unsupported through `LongCache` |
+| Generic LangChain, LangGraph, and LlamaIndex adapters | Compatibility pass-through (`pass-through`); opaque execution state is not cached |
+| All streaming helpers (`cached_stream`, `StreamingCacheAdapter`) | Pass-through (`pass-through`); no cache reads or writes |
 | Multi-turn, tools, multimodal, structured-output replay | Bypass until their identity and replay contracts are supported |
 
 ### OpenAI
@@ -135,9 +135,9 @@ Inject `LongCache(..., embedder=my_embedder)` using `BaseEmbedder`. Supply an `E
 
 One store generation has one embedding fingerprint. Equal dimensions do not make two models compatible. A revision or preprocessing change requires a fresh path/generation; mismatched stores fail before vector search or writes.
 
-## Upgrade from v0.2
+## Upgrade from v0.2–v0.4
 
-Compatible format-2 stores need no reset. See [upgrading to v0.3](migration-v0.3.md) for new execution, timeout, failure, and ownership behavior. Separate lookup/store code must opt into shared execution explicitly.
+Compatible format-2 stores need no reset. See [upgrading to v0.5](migration-v0.5.md) for API signature cleanups, PEP 561 typing, and `PUBLIC_API_STABILITY` tiers, and [upgrading to v0.3](migration-v0.3.md) for execution, timeout, failure, and ownership behavior. Separate lookup/store code must opt into shared execution explicitly.
 
 ## Legacy upgrade from v0.1.1
 
