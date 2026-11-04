@@ -138,6 +138,8 @@ module = [
     "torch.*",
     "redis",
     "redis.*",
+    "openai",
+    "openai.*",
 ]
 ignore_missing_imports = true
 

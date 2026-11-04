@@ -8,6 +8,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, cast
 
+from .decision import LookupDecision
 from .errors import (
     CacheOperationError,
     SingleflightInvalidatedError,
@@ -18,7 +19,6 @@ from .identity import digest
 
 if TYPE_CHECKING:
     from longcache.core.cache import LongCache
-    from longcache.core.decision import LookupDecision
 
 
 class _LeaseRenewal:
