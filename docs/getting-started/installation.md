@@ -1,8 +1,8 @@
 # Installation
 
-LongCache v0.5 requires Python 3.11 or newer; Python 3.11 and 3.12 are the tested interpreters. v0.1.1 remains the Python 3.10-compatible line.
+LongCache v0.6 requires Python 3.11 or newer; Python 3.11 and 3.12 are the tested interpreters. v0.1.1 remains the Python 3.10-compatible line.
 
-v0.5.0 is the current development line. The package-index commands install the available published release; they do not select this development checkout. To install this branch from the repository root:
+v0.6.0 is the current qualification and hardening milestone. The package-index commands install the available published release; they do not select this development checkout. To install this branch from the repository root:
 
 ```bash
 uv sync --locked --extra all --extra dev --extra docs

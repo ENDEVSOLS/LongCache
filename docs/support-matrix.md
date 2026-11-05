@@ -45,7 +45,7 @@ LongCache provides both active caching wrappers and explicit pass-through compat
 
 ---
 
-## API Stability Classification (v0.5.0)
+## API Stability Classification (v0.6.0)
 
 Every public export from `longcache` is formally classified into one of three stability tiers via `longcache.PUBLIC_API_STABILITY`:
 

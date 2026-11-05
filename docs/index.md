@@ -1,12 +1,12 @@
 # LongCache
 
-Semantic response reuse for Python LLM and RAG applications. **v0.5.0 is the current development line; Python 3.11 and 3.12 are the tested interpreters.** See the [Support Matrix](support-matrix.md) and [Upgrading to v0.5](migration-v0.5.md).
+Semantic response reuse for Python LLM and RAG applications. **v0.6.0 is the current qualification line; Python 3.11 and 3.12 are the tested interpreters.** See the [Support Matrix](support-matrix.md), [Release Process & Runbook](release-process.md), and [Upgrading to v0.5](migration-v0.5.md).
 
 LongCache finds similar requests with local embeddings and FAISS, then checks whether their execution context and reuse policy permit the same answer. Similarity alone does not establish correctness. Measure false hits and useful reuse on your own workload.
 
 ## Install
 
-v0.5.0 is currently a development checkout. Package-index commands install the available published release. See [installation](getting-started/installation.md) for installing and validating this branch.
+v0.6.0 is currently the qualification and hardening milestone. Package-index commands install the available published release. See [installation](getting-started/installation.md) for installing and validating this branch.
 
 ```bash
 uv pip install longcache
@@ -92,14 +92,14 @@ Async applications use `await cache.alookup(...)`, `await cache.aget(...)`, and 
 
 ## Supported integrations
 
-| Path | v0.5 status |
+| Path | v0.6 status |
 | ---- | ----------- |
 | Manual lookup/store | Supported (`stable-candidate`) with explicit trusted context; independent origin calls |
 | `get_or_compute` / `aget_or_compute` and query-only decorators | Supported (`stable-candidate`) with exact scoped singleflight |
 | OpenAI sync/async chat completions (`CachedOpenAI`) | Supported (`stable-candidate`) single-turn text subset with dict/SDK response replay |
 | ASGI middleware (`LongCacheMiddleware`) | Supported (`stable-candidate`) bounded single-turn JSON subset with trusted scope resolution; no HTTP invocation coalescing |
 | Memory, SQLite, synchronous Redis storage | Supported (`stable-candidate`) within one cache process |
-| Opt-in Shared Redis mode (`deployment_mode="shared"`) | Experimental (`experimental`); multi-process deployment over one Redis authority, release qualification open; see [shared deployment](deployment.md) |
+| Opt-in Shared Redis mode (`deployment_mode="shared"`) | Qualified candidate (`qualified-candidate`); multi-process deployment over Redis 7.2 with bounded memory, crash-recovery, and journal synchronization; see [shared deployment](deployment.md) |
 | Standalone async Redis backend (`AsyncRedisCacheBackend`) | Experimental (`experimental`) storage interface; unsupported through `LongCache` |
 | Generic LangChain, LangGraph, and LlamaIndex adapters | Compatibility pass-through (`pass-through`); opaque execution state is not cached |
 | All streaming helpers (`cached_stream`, `StreamingCacheAdapter`) | Pass-through (`pass-through`); no cache reads or writes |
