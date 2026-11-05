@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/ENDEVSOLS/LongCache/main/assets/logo.png" alt="LongCache Logo" width="320"/>
 </p>
 
-<p align="center"><strong>Semantic similarity cache for LLM and RAG pipelines .</strong></p>
+<p align="center"><strong>Production-grade semantic similarity cache for LLM and RAG pipelines — eliminate repetitive token costs and latency.</strong></p>
 
 <p align="center">
 <a href="https://pypi.org/project/longcache/"><img src="https://img.shields.io/pypi/v/longcache" alt="PyPI Version"></a>
@@ -21,11 +21,9 @@
 <a href="https://github.com/ENDEVSOLS/LongCache/blob/main/CHANGELOG.md"><strong>Changelog</strong></a>
 </p>
 
----
+> *"What is your refund policy?" costs $0.003 the first time. It should cost $0.0000 every time after that.*
 
-## What is LongCache?
-
-**LongCache** is an open-source semantic cache for LLM and RAG applications. Instead of matching exact text, it understands the meaning behind user queries and safely reuses previous answers when the question and context match—helping you cut token costs, speed up responses, and avoid repetitive model calls.
+**LongCache** is a production-grade semantic similarity cache for LLM and RAG pipelines. Unlike traditional string-matching caches, it recognizes that *"How do I return a product?"* and *"What's your return process?"* deserve the same cached answer — and serves it in milliseconds.
 
 
 ---
