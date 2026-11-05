@@ -81,6 +81,8 @@ nav:
     - FastAPI: integrations/fastapi.md
     - Changing-document RAG: integrations/versioned-rag.md
   - Reliability and Upgrade: reliability.md
+  - Support Matrix & API Stability: support-matrix.md
+  - Upgrade to v0.5: migration-v0.5.md
   - Shared Redis Deployment (Development): deployment.md
   - v0.4 Implementation Plan: plans/v0.4.0.md
   - v0.4 Execution Record: plans/v0.4.0-execution.md

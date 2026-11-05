@@ -5,9 +5,10 @@ Use explicit RequestContext with the manual interface for a proven workflow.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, Optional
 
-from longcache import LongCache, CacheConfig
+from longcache import CacheConfig, LongCache
 
 
 class CachedLLM:
@@ -21,7 +22,7 @@ class CachedLLM:
         cache: Optional[LongCache] = None,
         config: Optional[CacheConfig] = None,
         namespace: str = "langchain",
-    ):
+    ) -> None:
         """
         Initialize CachedLLM.
 
@@ -58,10 +59,10 @@ class CachedLLM:
             for msg in reversed(input):
                 if hasattr(msg, "content") and hasattr(msg, "type"):
                     if msg.type == "human":
-                        return msg.content
+                        return str(msg.content)
                 # Fallback: use last message with content
                 if hasattr(msg, "content"):
-                    return msg.content
+                    return str(msg.content)
             # Last resort: stringify
             return str(input[-1]) if input else ""
 
@@ -77,23 +78,23 @@ class CachedLLM:
 
         return str(input)
 
-    def invoke(self, input: Any, *args, **kwargs) -> Any:
+    def invoke(self, input: Any, *args: Any, **kwargs: Any) -> Any:
         """Delegate unchanged; unproven execution identity is never cached."""
 
         result = self.llm.invoke(input, *args, **kwargs)
         return result
 
-    async def ainvoke(self, input: Any, *args, **kwargs) -> Any:
+    async def ainvoke(self, input: Any, *args: Any, **kwargs: Any) -> Any:
         """Delegate unchanged; unproven execution identity is never cached."""
 
         result = await self.llm.ainvoke(input, *args, **kwargs)
         return result
 
-    def stream(self, input: Any, *args, **kwargs):
+    def stream(self, input: Any, *args: Any, **kwargs: Any) -> Iterator[Any]:
         """Delegate unchanged; unproven execution identity is never cached."""
         yield from self.llm.stream(input, *args, **kwargs)
 
-    async def astream(self, input: Any, *args, **kwargs):
+    async def astream(self, input: Any, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:
         """Delegate unchanged; unproven execution identity is never cached."""
         async for chunk in self.llm.astream(input, *args, **kwargs):
             yield chunk
@@ -118,7 +119,7 @@ class CachedChain:
         config: Optional[CacheConfig] = None,
         query_key: str = "question",
         namespace: str = "langchain_chain",
-    ):
+    ) -> None:
         """
         Initialize CachedChain.
 
@@ -145,16 +146,16 @@ class CachedChain:
             The extracted query string.
         """
         if isinstance(input, dict):
-            return input.get(self.query_key, str(input))
+            return str(input.get(self.query_key, str(input)))
         return str(input)
 
-    def invoke(self, input: Any, *args, **kwargs) -> Any:
+    def invoke(self, input: Any, *args: Any, **kwargs: Any) -> Any:
         """Delegate unchanged; unproven execution identity is never cached."""
 
         result = self.chain.invoke(input, *args, **kwargs)
         return result
 
-    async def ainvoke(self, input: Any, *args, **kwargs) -> Any:
+    async def ainvoke(self, input: Any, *args: Any, **kwargs: Any) -> Any:
         """Delegate unchanged; unproven execution identity is never cached."""
 
         result = await self.chain.ainvoke(input, *args, **kwargs)

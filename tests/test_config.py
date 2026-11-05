@@ -53,9 +53,13 @@ class TestCacheConfigValidation:
             CacheConfig(backend="dynamodb")
 
     def test_all_supported_backends_are_valid(self):
-        for backend in ("sqlite", "redis", "async_redis", "memory"):
+        for backend in ("sqlite", "redis", "memory"):
             config = CacheConfig(backend=backend)
             assert config.backend == backend
+
+    def test_async_redis_backend_raises(self):
+        with pytest.raises(ValueError, match="async_redis is not supported through LongCache"):
+            CacheConfig(backend="async_redis")
 
 
 class TestCacheConfigFromDict:

@@ -9,10 +9,15 @@ from __future__ import annotations
 
 import logging
 import threading
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from longcache.core.base_embedder import BaseEmbedder
+
+if TYPE_CHECKING:
+    from .embedding_contract import EmbeddingDescriptor
+    from .types import Float32Vector
 
 _log = logging.getLogger(__name__)
 
@@ -34,7 +39,15 @@ class LocalEmbedder(BaseEmbedder):
     _instances: dict[tuple[str, str], LocalEmbedder] = {}
     _lock = threading.Lock()
 
-    def __new__(cls, model_name: str = "BAAI/bge-small-en-v1.5", revision: str = ""):
+    _model_name: str
+    _revision: str
+    _model: Any
+    _dimension: int | None
+    _model_lock: threading.Lock
+
+    def __new__(
+        cls, model_name: str = "BAAI/bge-small-en-v1.5", revision: str = ""
+    ) -> LocalEmbedder:
         """
         Singleton pattern: one embedder instance per model name.
 
@@ -51,13 +64,14 @@ class LocalEmbedder(BaseEmbedder):
             if key not in cls._instances:
                 instance = super().__new__(cls)
                 instance._model_name = model_name
+                instance._revision = revision
                 instance._model = None
                 instance._dimension = None
                 instance._model_lock = threading.Lock()
                 cls._instances[key] = instance
             return cls._instances[key]
 
-    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5", revision: str = ""):
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5", revision: str = "") -> None:
         """
         Initialize the embedder. Model is loaded lazily on first embed() call.
 
@@ -65,24 +79,22 @@ class LocalEmbedder(BaseEmbedder):
             model_name: The sentence-transformers model identifier.
                 Defaults to BAAI/bge-small-en-v1.5 (384 dimensions).
         """
-        # __new__ handles actual initialization; __init__ just ensures
-        # the model name is set (idempotent for singleton)
         self._model_name = model_name
         self._revision = revision
 
     @property
-    def descriptor(self):
+    def descriptor(self) -> EmbeddingDescriptor:
         from .embedding_contract import EmbeddingDescriptor
 
         self._load_model()
         revision = self._revision
         if not revision:
-            revision = getattr(self._model[0].auto_model.config, "_commit_hash", None)
+            revision = getattr(self._model[0].auto_model.config, "_commit_hash", "") or ""
         if not revision:
             raise ValueError("Set embedder_revision to an immutable model revision")
         return EmbeddingDescriptor(self._model_name, revision, self.dimension)
 
-    def _load_model(self):
+    def _load_model(self) -> None:
         """
         Lazily load the sentence-transformers model.
 
@@ -112,8 +124,9 @@ class LocalEmbedder(BaseEmbedder):
                 getattr(self._model, "get_embedding_dimension", None)
                 or self._model.get_sentence_embedding_dimension
             )
-            self._dimension = get_dimension()
-            _log.info("Embedding model loaded: dim=%d", self._dimension)
+            dim_val = get_dimension()
+            self._dimension = int(dim_val) if dim_val is not None else None
+            _log.info("Embedding model loaded: dim=%s", self._dimension)
 
     @property
     def dimension(self) -> int:
@@ -126,9 +139,11 @@ class LocalEmbedder(BaseEmbedder):
             The dimensionality of the embedding vectors.
         """
         self._load_model()
+        if self._dimension is None:
+            raise ValueError("Failed to resolve embedding dimension")
         return self._dimension
 
-    def embed(self, text: str) -> np.ndarray:
+    def embed(self, text: str) -> Float32Vector:
         """
         Generate an embedding vector for the input text.
 
@@ -145,9 +160,9 @@ class LocalEmbedder(BaseEmbedder):
         """
         self._load_model()
         vector = self._model.encode(text, normalize_embeddings=True)
-        return vector.astype(np.float32)
+        return np.asarray(vector, dtype=np.float32)
 
-    def embed_batch(self, texts: list[str]) -> np.ndarray:
+    def embed_batch(self, texts: list[str]) -> Float32Vector:
         """
         Generate embedding vectors for multiple texts in a single batch.
 
@@ -166,7 +181,7 @@ class LocalEmbedder(BaseEmbedder):
 
         self._load_model()
         vectors = self._model.encode(texts, normalize_embeddings=True, batch_size=32)
-        return vectors.astype(np.float32)
+        return np.asarray(vectors, dtype=np.float32)
 
     def __repr__(self) -> str:
         model_status = "loaded" if self._model is not None else "not loaded"

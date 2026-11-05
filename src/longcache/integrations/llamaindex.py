@@ -21,7 +21,7 @@ class CachedQueryEngine:
         cache: Optional[LongCache] = None,
         config: Optional[CacheConfig] = None,
         namespace: str = "llamaindex",
-    ):
+    ) -> None:
         """
         Initialize CachedQueryEngine.
 
@@ -35,13 +35,13 @@ class CachedQueryEngine:
         self.cache = cache
         self._namespace = namespace
 
-    def query(self, query_str: str, **kwargs) -> Any:
+    def query(self, query_str: str, **kwargs: Any) -> Any:
         """Delegate unchanged; unproven execution identity is never cached."""
 
         result = self.query_engine.query(query_str, **kwargs)
         return result
 
-    async def aquery(self, query_str: str, **kwargs) -> Any:
+    async def aquery(self, query_str: str, **kwargs: Any) -> Any:
         """Delegate unchanged; unproven execution identity is never cached."""
 
         result = await self.query_engine.aquery(query_str, **kwargs)

@@ -1,16 +1,22 @@
 """Public, redacted cache decisions and policy hook results."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Literal
 import re
+from typing import Any
+
+from .types import InspectionReport, LookupOutcome, PolicyAction, StoreOutcome
+
+__all__ = ["PolicyDecision", "LookupDecision", "StoreDecision", "InspectionReport"]
 
 
 @dataclass(frozen=True)
 class PolicyDecision:
-    action: Literal["accept", "reject", "abstain"]
+    action: PolicyAction
     reason: str = "application_policy"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.action not in ("accept", "reject", "abstain"):
             raise ValueError("Invalid policy action")
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", self.reason):
@@ -19,7 +25,7 @@ class PolicyDecision:
 
 @dataclass(frozen=True)
 class LookupDecision:
-    outcome: Literal["HIT", "MISS", "BYPASS"]
+    outcome: LookupOutcome
     reason: str
     response: Any = field(default=None, repr=False)
     similarity: float | None = None
@@ -29,7 +35,7 @@ class LookupDecision:
     _expires_at: float | None = field(default=None, repr=False, compare=False)
     _shared_epoch: int | None = field(default=None, repr=False, compare=False)
 
-    def inspection(self) -> dict:
+    def inspection(self) -> InspectionReport:
         return {
             "outcome": self.outcome,
             "reason": self.reason,
@@ -42,6 +48,6 @@ class LookupDecision:
 
 @dataclass(frozen=True)
 class StoreDecision:
-    outcome: Literal["STORED", "REJECTED"]
+    outcome: StoreOutcome
     reason: str
     entry_id: int | None = None

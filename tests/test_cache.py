@@ -1,6 +1,7 @@
 """Tests for the LongCache main class."""
 
 import concurrent.futures
+from dataclasses import replace
 import time
 from unittest.mock import patch
 
@@ -8,6 +9,7 @@ import pytest
 
 from longcache.config import CacheConfig
 from longcache.core.cache import LongCache
+from longcache.core.identity import Instruction
 
 
 from tests.helpers import HashEmbedder, trusted_context
@@ -386,12 +388,14 @@ class TestCompositeCacheKeys:
         mock_embedder = _make_mock_embedder()
         MockEmbedder.return_value = mock_embedder
 
-        config_gpt = CacheConfig(backend="memory", model="gpt-4o")
-        cache_gpt = LongCache(config_gpt, context=trusted_context())
+        config_gpt = CacheConfig(backend="memory")
+        cache_gpt = LongCache(config_gpt, context=replace(trusted_context(), model="gpt-4o"))
         cache_gpt.embedder = mock_embedder
 
-        config_flash = CacheConfig(backend="memory", model="gemini-1.5-flash")
-        cache_flash = LongCache(config_flash, context=trusted_context())
+        config_flash = CacheConfig(backend="memory")
+        cache_flash = LongCache(
+            config_flash, context=replace(trusted_context(), model="gemini-1.5-flash")
+        )
         cache_flash.embedder = mock_embedder
 
         query = "Explain backpropagation"
@@ -409,10 +413,17 @@ class TestCompositeCacheKeys:
         cache.embedder = mock_embedder
 
         query = "What is a stock?"
-        cache.set(query, "Finance answer", system_prompt="You are a wall street trader")
+        ctx_trader = replace(
+            trusted_context(), instructions=(Instruction("system", "You are a wall street trader"),)
+        )
+        ctx_teacher = replace(
+            trusted_context(),
+            instructions=(Instruction("system", "You are a kindergarten teacher"),),
+        )
+        cache.set(query, "Finance answer", context=ctx_trader)
 
-        assert cache.get(query, system_prompt="You are a wall street trader") == "Finance answer"
-        assert cache.get(query, system_prompt="You are a kindergarten teacher") is None
+        assert cache.get(query, context=ctx_trader) == "Finance answer"
+        assert cache.get(query, context=ctx_teacher) is None
 
     @patch("longcache.core.cache.LocalEmbedder")
     def test_inspect_includes_context_and_tags(self, MockEmbedder):
@@ -422,20 +433,22 @@ class TestCompositeCacheKeys:
         cache = LongCache(CacheConfig(backend="memory"), context=trusted_context())
         cache.embedder = mock_embedder
 
+        ctx = replace(
+            trusted_context(),
+            model="gpt-4o",
+            instructions=(Instruction("system", "Act as banker"),),
+            generation={"temperature": 0.7},
+        )
         cache.set(
             "What is compound interest?",
             "Math answer",
-            model="gpt-4o",
-            system_prompt="Act as banker",
-            temperature=0.7,
+            context=ctx,
             tags=["finance", "math"],
         )
 
         entry = cache.inspect(
             "What is compound interest?",
-            model="gpt-4o",
-            system_prompt="Act as banker",
-            temperature=0.7,
+            context=ctx,
         )
         assert entry is not None
         assert entry["outcome"] == "HIT"

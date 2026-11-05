@@ -10,14 +10,15 @@ from __future__ import annotations
 
 import base64
 import json
-import time
 import threading
-from typing import Optional
+import time
+from typing import Any, Optional
 
 import numpy as np
 
 from longcache.backends.base import AbstractCacheBackend
 from longcache.core.entry import CacheEntry
+from longcache.core.types import Float32Vector
 
 
 class RedisCacheBackend(AbstractCacheBackend):
@@ -74,7 +75,7 @@ class RedisCacheBackend(AbstractCacheBackend):
         from redis.backoff import NoBackoff
         from redis.retry import Retry
 
-        self._client = redis.Redis.from_url(
+        self._client: Any = redis.Redis.from_url(
             redis_url,
             decode_responses=True,
             socket_connect_timeout=timeout,
@@ -82,11 +83,14 @@ class RedisCacheBackend(AbstractCacheBackend):
             retry=Retry(NoBackoff(), 0),
         )
 
-    def read_manifest(self):
+    def read_manifest(self) -> dict[str, Any] | None:
         data = self._client.get(self.ROOT + ":manifest")
-        return json.loads(data) if data else None
+        if not data:
+            return None
+        parsed: Any = json.loads(data)
+        return parsed if isinstance(parsed, dict) else None
 
-    def ensure_manifest(self, manifest: dict) -> None:
+    def ensure_manifest(self, manifest: dict[str, Any]) -> None:
         from longcache.core.identity import canonical
 
         encoded = canonical(manifest)
@@ -109,11 +113,11 @@ class RedisCacheBackend(AbstractCacheBackend):
         """Release Redis connections owned by this backend."""
         self._client.close()
 
-    def _vector_to_str(self, vector: np.ndarray) -> str:
+    def _vector_to_str(self, vector: Float32Vector) -> str:
         """Encode a numpy vector as base64 string for Redis storage."""
         return base64.b64encode(vector.tobytes()).decode("ascii")
 
-    def _str_to_vector(self, vector_str: str) -> np.ndarray:
+    def _str_to_vector(self, vector_str: str) -> Float32Vector:
         """Decode a base64 string back to a numpy vector."""
         return np.frombuffer(base64.b64decode(vector_str), dtype=np.float32).copy()
 
@@ -128,7 +132,7 @@ class RedisCacheBackend(AbstractCacheBackend):
             The auto-generated integer ID.
         """
         with self._lock:
-            entry_id = self._client.incr(self.ID_COUNTER)
+            entry_id = int(self._client.incr(self.ID_COUNTER))
 
             vector_str = self._vector_to_str(entry.vector) if entry.vector is not None else ""
             response_json = json.dumps(entry.response, allow_nan=False)
@@ -142,9 +146,9 @@ class RedisCacheBackend(AbstractCacheBackend):
                 "created_at": entry.created_at,
                 "expires_at": entry.expires_at or "",
                 "hit_count": entry.hit_count,
-                "model": entry.model,
-                "system_prompt": entry.system_prompt,
-                "temperature": entry.temperature,
+                "model": "",
+                "system_prompt": "",
+                "temperature": -1.0,
                 "tags": json.dumps(list(entry.tags or [])),
                 "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
             }
@@ -194,7 +198,7 @@ class RedisCacheBackend(AbstractCacheBackend):
 
         return entry
 
-    def _data_to_entry(self, data: dict) -> CacheEntry:
+    def _data_to_entry(self, data: dict[str, Any]) -> CacheEntry:
         """Convert Redis hash data to a CacheEntry."""
         vector = None
         if data.get("vector"):
@@ -221,9 +225,6 @@ class RedisCacheBackend(AbstractCacheBackend):
             except Exception:
                 pass
 
-        temp_val = data.get("temperature")
-        temperature = float(temp_val) if temp_val not in (None, "") else -1.0
-
         return CacheEntry(
             id=int(data["id"]),
             namespace=data["namespace"],
@@ -233,9 +234,6 @@ class RedisCacheBackend(AbstractCacheBackend):
             created_at=float(data["created_at"]),
             expires_at=expires_at,
             hit_count=int(data.get("hit_count", 0)),
-            model=data.get("model", ""),
-            system_prompt=data.get("system_prompt", ""),
-            temperature=temperature,
             tags=tags,
             metadata=json.loads(data.get("metadata", "{}")),
         )
@@ -259,7 +257,7 @@ class RedisCacheBackend(AbstractCacheBackend):
             pipe = self._client.pipeline()
             pipe.delete(key)
             if namespace:
-                pipe.srem(self._namespace_key(namespace), entry_id)
+                pipe.srem(self._namespace_key(str(namespace)), entry_id)
             pipe.execute()
             return True
 
@@ -275,7 +273,7 @@ class RedisCacheBackend(AbstractCacheBackend):
         """
         with self._lock:
             ns_key = self._namespace_key(namespace)
-            entry_ids = self._client.smembers(ns_key)
+            entry_ids = list(self._client.smembers(ns_key))
 
             if not entry_ids:
                 return 0
@@ -302,7 +300,7 @@ class RedisCacheBackend(AbstractCacheBackend):
         """
         tag_key = f"{self.ROOT}:tag:{namespace}:{tag}"
         with self._lock:
-            entry_ids = self._client.smembers(tag_key)
+            entry_ids = list(self._client.smembers(tag_key))
             if not entry_ids:
                 return 0
 
@@ -322,10 +320,10 @@ class RedisCacheBackend(AbstractCacheBackend):
             The number of entries deleted.
         """
         with self._lock:
-            namespaces = self._client.smembers(self.NAMESPACE_SET)
+            namespaces = list(self._client.smembers(self.NAMESPACE_SET))
             total = 0
             for ns in namespaces:
-                total += self.delete_namespace(ns)
+                total += self.delete_namespace(str(ns))
             return total
 
     def count(self, namespace: str) -> int:
@@ -339,7 +337,7 @@ class RedisCacheBackend(AbstractCacheBackend):
             The number of entries in the namespace.
         """
         ns_key = self._namespace_key(namespace)
-        return self._client.scard(ns_key)
+        return int(self._client.scard(ns_key))
 
     def list_entries(self, namespace: str) -> list[CacheEntry]:
         """
@@ -352,9 +350,9 @@ class RedisCacheBackend(AbstractCacheBackend):
             List of CacheEntry objects.
         """
         ns_key = self._namespace_key(namespace)
-        entry_ids = self._client.smembers(ns_key)
+        entry_ids = list(self._client.smembers(ns_key))
 
-        entries = []
+        entries: list[CacheEntry] = []
         for entry_id in entry_ids:
             entry = self.retrieve(int(entry_id))
             if entry is not None and not entry.is_expired():
@@ -364,9 +362,9 @@ class RedisCacheBackend(AbstractCacheBackend):
 
     def list_all_entries(self) -> list[CacheEntry]:
         """List live entries across every namespace for index reconstruction."""
-        entries = []
-        for namespace in self._client.smembers(self.NAMESPACE_SET):
-            entries.extend(self.list_entries(namespace))
+        entries: list[CacheEntry] = []
+        for namespace in list(self._client.smembers(self.NAMESPACE_SET)):
+            entries.extend(self.list_entries(str(namespace)))
         return entries
 
     def update_hit_count(self, entry_id: int) -> None:
@@ -397,7 +395,7 @@ class RedisCacheBackend(AbstractCacheBackend):
 
             evicted = 0
             for entry in entries[:count]:
-                if self.delete(entry.id):
+                if entry.id is not None and self.delete(entry.id):
                     evicted += 1
 
             return evicted
@@ -413,7 +411,7 @@ class RedisCacheBackend(AbstractCacheBackend):
             List of expired entry IDs.
         """
         entries = self.list_entries(namespace)
-        return [e.id for e in entries if e.is_expired()]
+        return [e.id for e in entries if e.id is not None and e.is_expired()]
 
     def __repr__(self) -> str:
         return f"RedisCacheBackend(redis_url={self._redis_url!r})"

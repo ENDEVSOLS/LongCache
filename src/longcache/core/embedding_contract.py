@@ -1,10 +1,18 @@
 """Validated embedding generations; equal dimensions do not imply compatible models."""
 
+from __future__ import annotations
+
 from dataclasses import asdict, dataclass
 import threading
+from typing import TYPE_CHECKING, Any
 from weakref import WeakKeyDictionary
 import numpy as np
+
 from .identity import digest
+
+if TYPE_CHECKING:
+    from .base_embedder import BaseEmbedder
+    from .types import Float32Vector
 
 
 @dataclass(frozen=True)
@@ -15,7 +23,7 @@ class EmbeddingDescriptor:
     preprocessing: str = "text-v1"
     normalization: str = "l2-float32-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if type(self.dimension) is not int or self.dimension < 1:
             raise ValueError("Embedding dimension must be a positive integer")
         if not all(
@@ -26,11 +34,11 @@ class EmbeddingDescriptor:
             raise ValueError("Unsupported normalization contract")
 
     @property
-    def fingerprint(self):
+    def fingerprint(self) -> str:
         return digest(asdict(self))
 
 
-def validate_vector(vector, dimension):
+def validate_vector(vector: Any, dimension: int) -> Float32Vector:
     if not isinstance(vector, np.ndarray) or vector.dtype != np.float32:
         raise ValueError("Embeddings must be float32 numpy arrays")
     if vector.shape != (dimension,) or not vector.flags.c_contiguous:
@@ -40,19 +48,19 @@ def validate_vector(vector, dimension):
     return vector.copy()
 
 
-_locks = WeakKeyDictionary()
+_locks: WeakKeyDictionary[Any, threading.RLock] = WeakKeyDictionary()
 _registry_lock = threading.Lock()
 
 
 class EmbeddingGuard:
-    def __init__(self, embedder):
+    def __init__(self, embedder: BaseEmbedder) -> None:
         self.embedder = embedder
         with _registry_lock:
             self.lock = _locks.setdefault(embedder, threading.RLock())
-        self._descriptor = None
+        self._descriptor: EmbeddingDescriptor | None = None
 
     @property
-    def descriptor(self):
+    def descriptor(self) -> EmbeddingDescriptor:
         with self.lock:
             current = self.embedder.descriptor
             if (
@@ -65,12 +73,12 @@ class EmbeddingGuard:
             self._descriptor = current
             return current
 
-    def embed(self, text):
+    def embed(self, text: str) -> Float32Vector:
         with self.lock:
             descriptor = self.descriptor
             return validate_vector(self.embedder.embed(text), descriptor.dimension)
 
-    def batch(self, texts):
+    def batch(self, texts: list[str]) -> Float32Vector:
         with self.lock:
             dimension = self.descriptor.dimension
             vectors = self.embedder.embed_batch(texts)

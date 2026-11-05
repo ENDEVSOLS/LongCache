@@ -10,6 +10,7 @@ import hashlib
 from itertools import islice
 import json
 import time
+from typing import Any, Iterable
 from uuid import uuid4
 
 from longcache.backends.redis import RedisCacheBackend
@@ -213,7 +214,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
 
     def __init__(
         self,
-        *args,
+        *args: Any,
         shared_max_entries: int = 50_000,
         shared_max_leases: int = 1024,
         shared_max_receipts: int = 100_000,
@@ -223,8 +224,8 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         shared_max_tag_chars: int = 256,
         distributed_lease_seconds: float = 15.0,
         distributed_renew_interval_seconds: float = 5.0,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         cache_id, generation = kwargs["cache_id"], kwargs["generation"]
         self.ROOT = f"longcache:shared-v1:{cache_id}:{generation}"
@@ -249,7 +250,8 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         self.LEASE_COUNTER = self.ROOT + ":lease_counter"
         self._lease_seconds = distributed_lease_seconds
         self._renew_interval = distributed_renew_interval_seconds
-        self._manifest = None
+        self._manifest: str | None = None
+        self._scan_cursor: int = 0
 
     def _namespace_key(self, namespace: str) -> str:
         return f"{self.ROOT}:ns:{namespace}"
@@ -264,7 +266,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
     def _tag_watermark(self, namespace: str, tag: str) -> str:
         return f"{self.ROOT}:wm:tag:{namespace}:{hashlib.sha1(tag.encode('utf-8')).hexdigest()}"
 
-    def ensure_manifest(self, manifest: dict) -> None:
+    def ensure_manifest(self, manifest: dict[str, Any]) -> None:
         definition = {
             **manifest,
             "coordination": "shared-v1",
@@ -310,9 +312,12 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         self._client.set(self.EPOCH, 0, nx=True)
         self._manifest = actual
 
-    def read_manifest(self):
+    def read_manifest(self) -> dict[str, Any] | None:
         raw = self._client.get(self.ROOT + ":manifest")
-        return json.loads(raw) if raw else None
+        if not raw:
+            return None
+        parsed: Any = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
 
     def revision(self) -> int:
         self._healthy()
@@ -327,11 +332,11 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         ):
             raise ValueError("Shared generation changed or lost its manifest")
 
-    def events(self, start: int, end: int, limit: int = 256):
+    def events(self, start: int, end: int, limit: int = 256) -> list[tuple[int, dict[str, Any]]]:
         """Return a bounded, ordered slice of authoritative mutations."""
         self._healthy()
         return [
-            (int(event_id.split("-", 1)[0]), fields)
+            (int(str(event_id).split("-", 1)[0]), dict(fields))
             for event_id, fields in self._client.xrange(
                 self.JOURNAL, min=f"{start}-0", max=f"{end}-0", count=limit
             )
@@ -341,7 +346,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         self._healthy()
         return int(self._client.get(self.EPOCH) or 0)
 
-    def store(
+    def store_shared(
         self,
         entry: CacheEntry,
         *,
@@ -364,9 +369,9 @@ class SharedRedisCacheBackend(RedisCacheBackend):
             "created_at": str(entry.created_at),
             "expires_at": str(entry.expires_at) if entry.expires_at is not None else "",
             "hit_count": str(entry.hit_count),
-            "model": entry.model,
-            "system_prompt": entry.system_prompt,
-            "temperature": str(entry.temperature),
+            "model": "",
+            "system_prompt": "",
+            "temperature": "-1.0",
             "tags": json.dumps(list(entry.tags or [])),
             "metadata": json.dumps(entry.metadata, sort_keys=True, allow_nan=False),
         }
@@ -375,7 +380,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         receipt_key = self.ROOT + ":receipt:" + uuid4().hex
         payload_digest = hashlib.sha256(payload.encode()).hexdigest()
 
-        def commit():
+        def commit() -> Any:
             return self._client.eval(
                 _STORE,
                 14,
@@ -414,22 +419,26 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         import redis
 
         try:
-            result = commit()
+            result: Any = commit()
         except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError):
             try:
                 result = commit()
             except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as exc:
                 raise CacheOperationError("store_indeterminate") from exc
-        if isinstance(result, list):
+        if isinstance(result, (list, tuple)):
             return int(result[0]), int(result[1])
         if int(result) == -2:
             return -1, None
         return int(result), None
 
+    def store(self, entry: CacheEntry) -> int:
+        identifier, _ = self.store_shared(entry)
+        return identifier
+
     def acquire_flight(self, exact_key: str, ttl_ms: int) -> tuple[str, str | None]:
         self._healthy()
         key = f"{self.ROOT}:flight:{exact_key}"
-        result = self._client.eval(
+        result: Any = self._client.eval(
             _ACQUIRE_FLIGHT,
             6,
             self.ROOT + ":manifest",
@@ -445,7 +454,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         )
         if int(result[0]) == -1:
             raise SingleflightCapacityError("Shared lease capacity reached")
-        return key, result[1] if int(result[0]) == 1 else None
+        return key, str(result[1]) if int(result[0]) == 1 else None
 
     def finish_flight(self, key: str, token: str, outcome: str) -> bool:
         if outcome not in ("error", "cancelled", "non_shareable"):
@@ -463,7 +472,8 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         )
 
     def flight_outcome(self, key: str) -> str | None:
-        return self._client.get(key + ":terminal")
+        val = self._client.get(key + ":terminal")
+        return str(val) if val is not None else None
 
     def renew_flight(self, key: str, token: str, ttl_ms: int) -> bool:
         return bool(
@@ -511,6 +521,8 @@ class SharedRedisCacheBackend(RedisCacheBackend):
         return entry
 
     def validate_hit(self, entry: CacheEntry, *, expected_epoch: int) -> bool:
+        if entry.id is None:
+            return False
         return bool(
             self._client.eval(
                 _VALIDATE,
@@ -530,7 +542,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
             )
         )
 
-    def _remove(self, ids):
+    def _remove(self, ids: Iterable[int | str]) -> int:
         total = 0
         iterator = iter(ids)
         while batch := list(islice(iterator, 256)):
@@ -578,7 +590,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
                 f"{membership}:{watermark}:{before}:{count}".encode()
             ).hexdigest()
 
-            def commit():
+            def commit() -> Any:
                 return self._client.eval(
                     _INVALIDATE,
                     9,
@@ -651,22 +663,20 @@ class SharedRedisCacheBackend(RedisCacheBackend):
     def count(self, namespace: str) -> int:
         return sum(
             self.retrieve(int(identifier)) is not None
-            for identifier in self._client.smembers(self._namespace_key(namespace))
+            for identifier in list(self._client.smembers(self._namespace_key(namespace)))
         )
 
     def evict_oldest(self, namespace: str, count: int) -> int:
         entries = sorted(self.list_entries(namespace), key=lambda item: item.created_at)
-        return sum(self.delete(entry.id) for entry in entries[:count])
+        return sum(self.delete(entry.id) for entry in entries[:count] if entry.id is not None)
 
     def get_expired(self, namespace: str) -> list[int]:
         return []
 
     def sweep_expired(self) -> int:
         """Bound cleanup of expired and logically invalidated shared entries."""
-        cursor, ids = self._client.sscan(
-            self.ALL_IDS, cursor=getattr(self, "_scan_cursor", 0), count=256
-        )
-        self._scan_cursor = cursor
+        cursor, ids = self._client.sscan(self.ALL_IDS, cursor=self._scan_cursor, count=256)
+        self._scan_cursor = int(cursor)
         invalid = [identifier for identifier in ids if self.retrieve(int(identifier)) is None]
         self._remove(invalid)
         return len(invalid)

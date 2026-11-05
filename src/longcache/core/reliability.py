@@ -1,21 +1,29 @@
 """Failure translation is restricted to dependency calls, never origin execution."""
 
+from __future__ import annotations
+
+import asyncio
 from functools import wraps
+import inspect
 import sqlite3
 import time
-import asyncio
-import inspect
+from typing import Any, Callable, ParamSpec, TypeVar, cast
 
 from .decision import LookupDecision, StoreDecision
-from .errors import CacheError, CacheOperationError
 from .errors import (
-    SingleflightTimeoutError,
+    CacheError,
+    CacheOperationError,
     SingleflightCapacityError,
     SingleflightInvalidatedError,
+    SingleflightTimeoutError,
 )
 
+P = ParamSpec("P")
+R = TypeVar("R")
+F = TypeVar("F", bound=Callable[..., Any])
 
-def operational(exception, stage):
+
+def operational(exception: BaseException, stage: str) -> bool:
     if isinstance(exception, CacheError):
         return False
     if isinstance(exception, (OSError, TimeoutError, sqlite3.OperationalError)):
@@ -23,14 +31,16 @@ def operational(exception, stage):
     if stage in ("embedding", "index") and isinstance(exception, RuntimeError):
         return True
     try:
-        from redis.exceptions import ConnectionError, TimeoutError as RedisTimeout, BusyLoadingError
+        from redis.exceptions import BusyLoadingError, ConnectionError, TimeoutError as RedisTimeout
 
         return isinstance(exception, (ConnectionError, RedisTimeout, BusyLoadingError))
     except ImportError:
         return False
 
 
-def dependency(cache, stage, function, *args, **kwargs):
+def dependency(
+    cache: Any, stage: str, function: Callable[P, R], *args: P.args, **kwargs: P.kwargs
+) -> R:
     started = time.monotonic()
     try:
         return function(*args, **kwargs)
@@ -43,12 +53,12 @@ def dependency(cache, stage, function, *args, **kwargs):
         cache._observability.duration(stage, time.monotonic() - started)
 
 
-def decision_operation(operation):
+def decision_operation(operation: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Apply runtime cache policy and record one external decision."""
 
-    def decorate(function):
+    def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(function)
-        def wrapped(self, *args, **kwargs):
+        def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
             started = time.monotonic()
             internal = kwargs.pop("_internal", False)
             try:
@@ -94,10 +104,10 @@ def decision_operation(operation):
     return decorate
 
 
-def execution_operation(function):
+def execution_operation(function: F) -> F:
     """Record terminal failures once; successful delivery is recorded centrally."""
 
-    def failed(cache, error, mode):
+    def failed(cache: Any, error: BaseException, mode: str) -> None:
         if isinstance(error, asyncio.CancelledError):
             outcome, reason = "cancelled", "cancelled"
         elif isinstance(error, SingleflightTimeoutError):
@@ -115,7 +125,7 @@ def execution_operation(function):
     if inspect.iscoroutinefunction(function):
 
         @wraps(function)
-        async def async_wrapped(self, *args, **kwargs):
+        async def async_wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
             started = time.monotonic()
             try:
                 return await function(self, *args, **kwargs)
@@ -125,10 +135,10 @@ def execution_operation(function):
             finally:
                 self._observability.duration("execution", time.monotonic() - started, "async")
 
-        return async_wrapped
+        return cast(F, async_wrapped)
 
     @wraps(function)
-    def wrapped(self, *args, **kwargs):
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
         started = time.monotonic()
         try:
             return function(self, *args, **kwargs)
@@ -138,4 +148,4 @@ def execution_operation(function):
         finally:
             self._observability.duration("execution", time.monotonic() - started)
 
-    return wrapped
+    return cast(F, wrapped)

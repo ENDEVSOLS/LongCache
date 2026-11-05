@@ -9,7 +9,7 @@ storage engine.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Any, Protocol, runtime_checkable
 
 from longcache.core.entry import CacheEntry
 
@@ -37,7 +37,7 @@ class AbstractCacheBackend(ABC):
         ...
 
     @abstractmethod
-    def retrieve(self, entry_id: int) -> Optional[CacheEntry]:
+    def retrieve(self, entry_id: int) -> CacheEntry | None:
         """
         Retrieve a cache entry by its ID.
 
@@ -172,11 +172,54 @@ class AbstractCacheBackend(ABC):
         ...
 
     @abstractmethod
-    def ensure_manifest(self, manifest: dict) -> None:
+    def ensure_manifest(self, manifest: dict[str, Any]) -> None:
         """Initialize or compare the immutable store generation descriptor."""
         ...
 
     @abstractmethod
-    def read_manifest(self) -> dict | None:
+    def read_manifest(self) -> dict[str, Any] | None:
         """Read generation metadata without loading an embedding model."""
         ...
+
+    def sweep_expired(self) -> int:
+        """Remove expired entries across all tracked namespaces."""
+        return 0
+
+    def close(self) -> None:
+        """Release underlying connections or handles."""
+        return None
+
+
+@runtime_checkable
+class SharedCoordinationBackend(Protocol):
+    """Protocol for shared-mode backends providing journaled multi-process coordination."""
+
+    def revision(self) -> int: ...
+    def epoch(self) -> int: ...
+    def events(self, start: int, end: int) -> list[tuple[int, dict[str, Any]]]: ...
+    def validate_hit(self, entry: CacheEntry, expected_epoch: int) -> bool: ...
+    def store_shared(
+        self,
+        entry: CacheEntry,
+        *,
+        expected_epoch: int | None = None,
+        lease_key: str = "",
+        lease_token: str = "",
+    ) -> tuple[int, int | None]: ...
+    def acquire_lease(
+        self,
+        exact_key: str,
+        owner_id: str,
+        duration_seconds: float,
+    ) -> tuple[bool, str, int]: ...
+    def renew_lease(
+        self,
+        exact_key: str,
+        lease_token: str,
+        duration_seconds: float,
+    ) -> bool: ...
+    def release_lease(
+        self,
+        exact_key: str,
+        lease_token: str,
+    ) -> bool: ...

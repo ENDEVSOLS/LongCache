@@ -1,10 +1,9 @@
 """
-Similarity index for LongCache using FAISS.
+FAISS-based vector similarity index for LongCache.
 
-Provides fast approximate nearest neighbor search over embedding vectors.
-Uses IndexFlatIP (inner product) for exact search, which works well
-for caches with up to ~100K entries. For larger caches, consider
-switching to an IVF index.
+Maintains an in-memory IndexFlatIP (Inner Product = Cosine Similarity for
+normalized vectors) mapping query embeddings to CacheEntry IDs.
+Supports both synchronous and asynchronous operations.
 """
 
 from __future__ import annotations
@@ -12,20 +11,24 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 import threading
-from typing import Optional
+from typing import TYPE_CHECKING, Any, Callable
 
 import numpy as np
 
-from longcache.core.entry import CacheEntry
+if TYPE_CHECKING:
+    from longcache.backends.base import AbstractCacheBackend
+    from longcache.config import CacheConfig
+    from longcache.core.entry import CacheEntry
+    from longcache.core.types import Float32Vector
 
 
 class SimilarityIndex:
     """
-    FAISS-based similarity index for cache lookups.
+    In-memory vector index backed by FAISS IndexFlatIP.
 
-    Maintains an in-memory FAISS index alongside a mapping from
-    internal FAISS IDs to CacheEntry objects. All operations are
-    thread-safe via a reentrant lock.
+    Maps 0-indexed internal FAISS IDs to persistent CacheEntry IDs.
+    Thread-safe via threading.RLock for synchronous calls, with
+    asyncio.Lock for async entry points.
 
     Usage:
         index = SimilarityIndex(backend, config)
@@ -33,7 +36,7 @@ class SimilarityIndex:
         result = index.find_similar(query_vector, threshold=0.92)
     """
 
-    def __init__(self, backend, config):
+    def __init__(self, backend: AbstractCacheBackend, config: CacheConfig) -> None:
         """
         Initialize the similarity index.
 
@@ -44,12 +47,12 @@ class SimilarityIndex:
         self._backend = backend
         self._config = config
         self._lock = threading.RLock()
-        self._async_lock: Optional[asyncio.Lock] = None
-        self._faiss_index = None
+        self._async_lock: asyncio.Lock | None = None
+        self._faiss_index: Any = None
         self._id_map: dict[int, int] = {}  # faiss_internal_id -> entry_id
         self._entry_ids: set[int] = set()
         self._next_faiss_id = 0
-        self._dimension = None
+        self._dimension: int | None = None
         self._orphan_count = 0  # vectors in FAISS with no id_map entry
         self._REBUILD_THRESHOLD = 0.20  # rebuild when 20% of index is orphaned
         self._removed_entry_ids: set[int] = set()  # entry ids explicitly removed via remove()
@@ -60,7 +63,7 @@ class SimilarityIndex:
             self._async_lock = asyncio.Lock()
         return self._async_lock
 
-    def _new_index(self, dimension: int):
+    def _new_index(self, dimension: int) -> Any:
         """Create an empty index that honors the configured search mode."""
         import faiss
 
@@ -70,7 +73,7 @@ class SimilarityIndex:
             return index
         return faiss.IndexFlatIP(dimension)
 
-    def _ensure_index(self, dimension: int):
+    def _ensure_index(self, dimension: int) -> None:
         """
         Lazily create the FAISS index with the given dimension.
 
@@ -86,7 +89,7 @@ class SimilarityIndex:
         self._faiss_index = self._new_index(dimension)
         self._dimension = dimension
 
-    def add(self, vector: np.ndarray, entry_id: int) -> None:
+    def add(self, vector: Float32Vector, entry_id: int) -> None:
         """
         Add an embedding vector to the index.
 
@@ -108,27 +111,39 @@ class SimilarityIndex:
             # FAISS expects 2D arrays
             vector_2d = vector.reshape(1, -1).astype(np.float32)
             faiss_id = self._next_faiss_id
+            if self._faiss_index is None:
+                self._ensure_index(vector.shape[0])
+            assert self._faiss_index is not None
             self._faiss_index.add(vector_2d)
             self._id_map[faiss_id] = entry_id
             self._entry_ids.add(entry_id)
             self._next_faiss_id += 1
 
-    async def async_add(self, vector: np.ndarray, entry_id: int) -> None:
+    async def async_add(self, vector: Float32Vector, entry_id: int) -> None:
         """Async-safe version of add() for use in async contexts."""
         async with self._get_async_lock():
             self.add(vector, entry_id)
 
-    def candidates(self, vector, namespace, threshold, limit, *, retrieve=None):
+    def candidates(
+        self,
+        vector: Float32Vector,
+        namespace: str,
+        threshold: float,
+        limit: int,
+        *,
+        retrieve: Callable[[int], CacheEntry | None] | None = None,
+    ) -> list[tuple[CacheEntry, float]]:
         """Return scored eligible snapshots without recording hits or invoking hooks."""
-        retrieve = retrieve or self._backend.retrieve
+        retrieve_fn = retrieve or self._backend.retrieve
         with self._lock:
             if self._faiss_index is None or self._faiss_index.ntotal == 0:
                 return []
             if vector.shape != (self._dimension,):
                 raise ValueError("Incompatible embedding dimension")
-            total = self._faiss_index.ntotal
+            total = int(self._faiss_index.ntotal)
             k = min(total, max(8, limit))
-            seen, result = set(), []
+            seen: set[int] = set()
+            result: list[tuple[CacheEntry, float]] = []
             while True:
                 scores, ids = self._faiss_index.search(vector.reshape(1, -1), k)
                 for score, faiss_id in zip(scores[0], ids[0]):
@@ -136,7 +151,7 @@ class SimilarityIndex:
                     if identifier is None or identifier in seen or score < threshold:
                         continue
                     seen.add(identifier)
-                    entry = retrieve(identifier)
+                    entry = retrieve_fn(identifier)
                     if (
                         entry is not None
                         and entry.namespace == namespace
@@ -151,42 +166,43 @@ class SimilarityIndex:
 
     def find_similar(
         self,
-        vector: np.ndarray,
-        threshold: float = 0.92,
+        query_vector: Float32Vector,
+        threshold: float | None = None,
         namespace: str = "default",
-        *,
         record_hit: bool = True,
-    ) -> Optional[CacheEntry]:
+    ) -> CacheEntry | None:
         """
-        Find the most similar cached entry for the given query vector.
+        Search the index for the most similar non-expired entry in the namespace.
 
-        Searches the FAISS index for the nearest neighbor, then verifies
-        the entry exists in the backend, belongs to the correct namespace,
-        and meets the similarity threshold.
+        Eligible candidates in the requested namespace are checked in descending
+        similarity order so an expired or wrong-namespace vector does not hide a hit.
 
         Args:
-            vector: L2-normalized query embedding vector.
-            threshold: Minimum cosine similarity for a cache hit.
-            namespace: Only return entries from this namespace.
+            query_vector: L2-normalized float32 array of shape (dimension,).
+            threshold: Minimum cosine similarity score (0.0-1.0).
+                Defaults to config.similarity_threshold if None.
+            namespace: Only match entries from this namespace.
+            record_hit: If True, increments hit_count on the matched entry.
 
         Returns:
-            CacheEntry if a similar entry is found above the threshold,
-            None otherwise.
+            The best matching CacheEntry if similarity >= threshold, None otherwise.
         """
+        if threshold is None:
+            threshold = self._config.similarity_threshold
+
         with self._lock:
             if self._faiss_index is None or self._faiss_index.ntotal == 0:
                 return None
-            if vector.shape != (self._dimension,):
+            if self._dimension is not None and query_vector.shape != (self._dimension,):
                 raise ValueError("Embedding dimension changed; clear the cache before reuse")
 
-            vector_2d = vector.reshape(1, -1).astype(np.float32)
-            total = self._faiss_index.ntotal
+            total = int(self._faiss_index.ntotal)
             k = min(total, 8)
             examined = 0
             while True:
-                similarities, indices = self._faiss_index.search(vector_2d, k)
-                for similarity, faiss_id in zip(similarities[0][examined:], indices[0][examined:]):
-                    if faiss_id < 0 or similarity < threshold:
+                scores, ids = self._faiss_index.search(query_vector.reshape(1, -1), k)
+                for score, faiss_id in zip(scores[0][examined:], ids[0][examined:]):
+                    if score < threshold or int(faiss_id) == -1:
                         return None
                     entry_id = self._id_map.get(int(faiss_id))
                     if entry_id is None:
@@ -235,8 +251,10 @@ class SimilarityIndex:
                 (self._orphan_count / total) * 100,
             )
             entries = self._backend.list_all_entries()
-            entries = [e for e in entries if e.id not in self._removed_entry_ids]
-            self.rebuild(entries)
+            filtered_entries = [
+                e for e in entries if e.id is not None and e.id not in self._removed_entry_ids
+            ]
+            self.rebuild(filtered_entries)
             self._orphan_count = 0
 
     def rebuild(self, entries: list[CacheEntry]) -> None:
@@ -250,9 +268,10 @@ class SimilarityIndex:
             entries: List of CacheEntry objects with their vectors populated.
         """
         with self._lock:
-            valid_entries = [
-                e for e in (entries or []) if e.vector is not None and e.id is not None
-            ]
+            valid_entries: list[tuple[int, Float32Vector]] = []
+            for e in entries or []:
+                if e.vector is not None and e.id is not None:
+                    valid_entries.append((e.id, e.vector))
 
             if not valid_entries:
                 self._faiss_index = None
@@ -264,16 +283,16 @@ class SimilarityIndex:
                 self._dimension = None
                 return
 
-            dimension = valid_entries[0].vector.shape[0]
-            if any(entry.vector.shape != (dimension,) for entry in valid_entries):
+            dimension = valid_entries[0][1].shape[0]
+            if any(vec.shape != (dimension,) for _, vec in valid_entries):
                 raise ValueError("Persisted cache contains incompatible embedding dimensions")
 
             replacement = self._new_index(dimension)
-            vectors_array = np.stack([entry.vector for entry in valid_entries]).astype(np.float32)
+            vectors_array = np.stack([vec for _, vec in valid_entries]).astype(np.float32)
             replacement.add(vectors_array)
             self._faiss_index = replacement
-            self._id_map = {i: entry.id for i, entry in enumerate(valid_entries)}
-            self._entry_ids = {entry.id for entry in valid_entries}
+            self._id_map = {i: entry_id for i, (entry_id, _) in enumerate(valid_entries)}
+            self._entry_ids = {entry_id for entry_id, _ in valid_entries}
             self._next_faiss_id = len(valid_entries)
             self._dimension = dimension
 
@@ -284,9 +303,9 @@ class SimilarityIndex:
     def size(self) -> int:
         """Return the number of entries currently in the index."""
         with self._lock:
-            return self._faiss_index.ntotal if self._faiss_index is not None else 0
+            return len(self._id_map)
 
-    def __repr__(self) -> str:
-        size = self.size
-        dim = self._dimension or "uninitialized"
-        return f"SimilarityIndex(size={size}, dimension={dim})"
+    @property
+    def dimension(self) -> int | None:
+        """Return the dimensionality of the index, or None if not initialized."""
+        return self._dimension

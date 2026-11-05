@@ -1,8 +1,14 @@
 """Abstract base class for all embedder implementations."""
 
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 import numpy as np
+
+if TYPE_CHECKING:
+    from .embedding_contract import EmbeddingDescriptor
+    from .types import Float32Vector
 
 
 class BaseEmbedder(ABC):
@@ -14,10 +20,10 @@ class BaseEmbedder(ABC):
     the FAISS index and must not change between calls.
     """
 
-    thread_safe = False
+    thread_safe: bool = False
 
     @property
-    def descriptor(self):
+    def descriptor(self) -> EmbeddingDescriptor:
         """Declare a stable model/revision contract for persisted vector compatibility."""
         raise ValueError("Custom embedders must supply an EmbeddingDescriptor")
 
@@ -28,7 +34,7 @@ class BaseEmbedder(ABC):
         ...
 
     @abstractmethod
-    def embed(self, text: str) -> np.ndarray:
+    def embed(self, text: str) -> Float32Vector:
         """
         Embed a single text string.
 
@@ -37,7 +43,7 @@ class BaseEmbedder(ABC):
         """
         ...
 
-    def embed_batch(self, texts: list[str]) -> np.ndarray:
+    def embed_batch(self, texts: list[str]) -> Float32Vector:
         """
         Embed multiple texts. Default: loop over embed().
         Override for batched efficiency.
@@ -45,8 +51,6 @@ class BaseEmbedder(ABC):
         Returns:
             float32 array of shape (len(texts), dimension).
         """
-        import numpy as np
-
         if not texts:
             return np.empty((0, self.dimension), dtype=np.float32)
         return np.stack([self.embed(t) for t in texts])

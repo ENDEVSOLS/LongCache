@@ -1,62 +1,79 @@
 """Owned operations and bounded worker execution, shared by sync and async callers."""
 
-from concurrent.futures import ThreadPoolExecutor
+from __future__ import annotations
+
+import asyncio
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from functools import wraps
-import asyncio
+import inspect
 import threading
 import time
+from typing import Any, Callable, Generator, TypeVar, cast
 
 from .errors import CacheCapacityError, CacheClosedError, CacheShutdownTimeoutError
 
+F = TypeVar("F", bound=Callable[..., Any])
+T = TypeVar("T")
 
-def managed(function):
+_Actor = tuple[int, asyncio.Task[Any] | None]
+_Binding = tuple["Operation", _Actor]
+
+
+def managed(function: F) -> F:
     """Keep resources alive until this public synchronous operation exits."""
 
     @wraps(function)
-    def wrapped(self, *args, **kwargs):
+    def wrapped(self: Any, *args: Any, **kwargs: Any) -> Any:
         with self._lifecycle.operation():
             return function(self, *args, **kwargs)
 
-    return wrapped
+    return cast(F, wrapped)
 
 
 class Operation:
-    def __init__(self):
+    def __init__(self) -> None:
         self.cancelled = threading.Event()
         self.shutdown_cancelled = False
         try:
-            self.task = asyncio.current_task()
+            self.task: asyncio.Task[Any] | None = asyncio.current_task()
         except RuntimeError:
             self.task = None
 
-    def is_set(self):
+    def is_set(self) -> bool:
         return self.cancelled.is_set()
 
-    def set(self):
+    def set(self) -> None:
         self.cancelled.set()
 
 
 class Lifecycle:
-    def __init__(self, finalize, revoke, timeout):
+    def __init__(
+        self,
+        finalize: Callable[[], None],
+        revoke: Callable[[], None],
+        timeout: float,
+    ) -> None:
         self._condition = threading.Condition()
-        self._current = ContextVar(f"longcache_operation_{id(self)}", default=None)
-        self._active = {}
-        self.state = "OPEN"
-        self._finalizing = False
-        self._failure = None
+        self._current: ContextVar[_Binding | None] = ContextVar(
+            f"longcache_operation_{id(self)}", default=None
+        )
+        self._active: dict[Operation, int] = {}
+        self.state: str = "OPEN"
+        self._finalizing: bool = False
+        self._failure: BaseException | None = None
         self._finalize = finalize
         self._revoke = revoke
-        self.timeout = timeout
+        self.timeout: float = timeout
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="longcache-worker")
         self._capacity = threading.BoundedSemaphore(64)
-        self._jobs = 0
-        self._close_thread = None
-        self._close_error = None
+        self._jobs: int = 0
+        self._close_thread: threading.Thread | None = None
+        self._close_error: BaseException | None = None
 
     @property
-    def current(self):
+    def current(self) -> Operation | None:
         binding = self._current.get()
         # create_task copies contextvars. A child request must not inherit its
         # parent's ownership/cancellation token merely because it inherited context.
@@ -65,14 +82,14 @@ class Lifecycle:
         return None
 
     @staticmethod
-    def _actor():
+    def _actor() -> _Actor:
         try:
-            task = asyncio.current_task()
+            task: asyncio.Task[Any] | None = asyncio.current_task()
         except RuntimeError:
             task = None
         return threading.get_ident(), task
 
-    def ensure_open(self):
+    def ensure_open(self) -> None:
         with self._condition:
             token = self.current
             if self.state == "OPEN":
@@ -81,16 +98,16 @@ class Lifecycle:
                 return
             raise CacheClosedError("Cache is closed or closing")
 
-    def _reserve(self):
+    def _reserve(self) -> Operation:
         with self._condition:
             self.ensure_open()
             token = self.current
-            if token not in self._active:
+            if token not in self._active or token is None:
                 token = Operation()
             self._active[token] = self._active.get(token, 0) + 1
             return token
 
-    def _release(self, token):
+    def _release(self, token: Operation) -> None:
         with self._condition:
             self._active[token] -= 1
             if not self._active[token]:
@@ -99,7 +116,7 @@ class Lifecycle:
         self._finish_if_idle()
 
     @contextmanager
-    def operation(self):
+    def operation(self) -> Generator[Operation, None, None]:
         token = self._reserve()
         binding = self._current.set((token, self._actor()))
         try:
@@ -108,7 +125,9 @@ class Lifecycle:
             self._current.reset(binding)
             self._release(token)
 
-    def submit(self, function, *args, **kwargs):
+    def submit(
+        self, function: Callable[..., T], *args: Any, **kwargs: Any
+    ) -> tuple[Future[T], Operation]:
         if not self._capacity.acquire(blocking=False):
             raise CacheCapacityError("Cache worker capacity reached")
         try:
@@ -118,20 +137,27 @@ class Lifecycle:
             raise
         context = copy_context()
 
-        def run():
+        def run() -> T:
             binding = self._current.set((token, self._actor()))
             try:
                 self.ensure_open()
                 if token.is_set():
                     raise CacheClosedError("Queued cache operation was cancelled")
-                return function(*args, _cancel=token, **kwargs)
+                call_kwargs = dict(kwargs)
+                if "_cancel" not in call_kwargs:
+                    try:
+                        if "_cancel" in inspect.signature(function).parameters:
+                            call_kwargs["_cancel"] = token
+                    except (ValueError, TypeError):
+                        pass
+                return function(*args, **call_kwargs)
             finally:
                 self._current.reset(binding)
 
         with self._condition:
             self._jobs += 1
 
-        def done(_):
+        def done(_: Future[T]) -> None:
             with self._condition:
                 self._jobs -= 1
             self._capacity.release()
@@ -140,12 +166,12 @@ class Lifecycle:
         try:
             future = self._executor.submit(context.run, run)
         except BaseException:
-            done(None)
+            done(cast(Future[T], None))
             raise
         future.add_done_callback(done)
         return future, token
 
-    async def call(self, function, *args, **kwargs):
+    async def call(self, function: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         future, token = self.submit(function, *args, **kwargs)
         bridge = asyncio.wrap_future(future)
         bridge.add_done_callback(lambda result: None if result.cancelled() else result.exception())
@@ -158,7 +184,7 @@ class Lifecycle:
             # arguments, allowing repeated cancellations to grow the queue forever.
             raise
 
-    def _finish_if_idle(self):
+    def _finish_if_idle(self) -> None:
         with self._condition:
             if self.state != "CLOSING" or self._active or self._finalizing:
                 return
@@ -175,17 +201,18 @@ class Lifecycle:
                     self.state = "CLOSED"
                 self._condition.notify_all()
 
-    def close(self, timeout=None):
-        timeout = self.timeout if timeout is None else timeout
-        if type(timeout) not in (int, float) or not 0 < timeout < float("inf"):
+    def close(self, timeout: float | None = None) -> None:
+        actual_timeout = self.timeout if timeout is None else timeout
+        if type(actual_timeout) not in (int, float) or not 0 < actual_timeout < float("inf"):
             raise ValueError("Shutdown timeout must be positive and finite")
-        if self.current in self._active:
+        if self.current is not None and self.current in self._active:
             raise CacheClosedError("Cannot close the cache from its own active operation")
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + actual_timeout
         with self._condition:
             if self.state == "OPEN":
                 self.state = "CLOSING"
         self._finish_if_idle()
+        cancel_tasks: list[asyncio.Task[Any]] = []
         with self._condition:
             while self.state != "CLOSED":
                 if self._failure is not None:
@@ -218,13 +245,13 @@ class Lifecycle:
                     loop.call_soon_threadsafe(task.cancel)
         raise CacheShutdownTimeoutError("Cache cleanup is pending active operations")
 
-    async def aclose(self, timeout=None):
-        timeout = self.timeout if timeout is None else timeout
-        if type(timeout) not in (int, float) or not 0 < timeout < float("inf"):
+    async def aclose(self, timeout: float | None = None) -> None:
+        actual_timeout = self.timeout if timeout is None else timeout
+        if type(actual_timeout) not in (int, float) or not 0 < actual_timeout < float("inf"):
             raise ValueError("Shutdown timeout must be positive and finite")
-        if self.current in self._active:
+        if self.current is not None and self.current in self._active:
             raise CacheClosedError("Cannot close the cache from its own active operation")
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + actual_timeout
         with self._condition:
             if self.state == "CLOSED":
                 return
@@ -234,9 +261,9 @@ class Lifecycle:
                 self.state = "CLOSING"
                 self._close_error = None
 
-                def drain():
+                def drain() -> None:
                     try:
-                        self.close(timeout)
+                        self.close(actual_timeout)
                     except BaseException as exc:
                         with self._condition:
                             self._close_error = exc
@@ -260,7 +287,7 @@ class Lifecycle:
         if error is not None:
             raise CacheClosedError("Cache resource cleanup failed") from error
 
-    def snapshot(self):
+    def snapshot(self) -> dict[str, Any]:
         with self._condition:
             return {
                 "state": self.state,

@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -14,9 +18,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install ruff==0.17.3
+      - run: pip install ruff==0.17.3 "mypy>=1.9.0" "numpy>=1.24.0,<2.0.0" "click>=8.1.0"
       - name: Check lint and formatting
         run: make lint
+      - name: Type check (strict)
+        run: make typecheck
 
   test:
     timeout-minutes: 20
@@ -88,6 +94,9 @@ jobs:
 
       - name: Run offline reliability example
         run: uv run --no-sync python examples/reliability.py
+
+      - name: Typecheck consumer against wheel
+        run: uv run --no-sync python scripts/wheel_typecheck_v5.py
 
       - name: Validate documentation
         if: matrix.python-version == '3.12'

@@ -23,5 +23,5 @@ Release resources with `with` / `close()` in sync code or `async with` / `aclose
 async code. `examples/safe_reuse.py` and `examples/reliability.py` are executable offline
 examples with deterministic injected embedders and no external service/model download.
 For changing documents, follow the [versioned RAG guide](../integrations/versioned-rag.md).
-Before upgrading, read [v0.3 migration](../migration-v0.3.md) and the
+Before upgrading, read [v0.5 migration](../migration-v0.5.md), the [support matrix](../support-matrix.md), and the
 [reliability contracts](../reliability.md).

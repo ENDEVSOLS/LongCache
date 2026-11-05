@@ -7,8 +7,14 @@ validation, and factory methods for construction from dicts or env vars.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
+import math
 import os
-from dataclasses import dataclass, asdict
+import re
+from typing import Any
+
+from .core.types import BackendName, DeploymentMode, ErrorPolicy, FaissIndexType, ScopePolicy
 
 
 @dataclass
@@ -37,7 +43,7 @@ class CacheConfig:
     max_entries: int = 10_000
     namespace: str = "default"
     embedder_model: str = "BAAI/bge-small-en-v1.5"
-    backend: str = "sqlite"
+    backend: BackendName = "sqlite"
     db_path: str = ".longcache/v2/cache.db"
     redis_url: str = "redis://localhost:6379/0"
     track_stats: bool = True
@@ -45,10 +51,10 @@ class CacheConfig:
     singleflight_wait_timeout_seconds: float = 30.0
     singleflight_max_inflight: int = 1024
     singleflight_max_waiters_per_key: int = 256
-    cache_error_policy: str = "raise"
+    cache_error_policy: ErrorPolicy = "raise"
     backend_timeout_seconds: float = 2.0
     shutdown_timeout_seconds: float = 5.0
-    deployment_mode: str = "single_process"
+    deployment_mode: DeploymentMode = "single_process"
     shared_sync_timeout_seconds: float = 5.0
     shared_max_entries: int = 50_000
     shared_max_leases: int = 1024
@@ -59,10 +65,10 @@ class CacheConfig:
     shared_max_tag_chars: int = 256
     distributed_lease_seconds: float = 15.0
     distributed_renew_interval_seconds: float = 5.0
-    faiss_index_type: str = "flat"
+    faiss_index_type: FaissIndexType = "flat"
     hnsw_m: int = 32
     hnsw_ef_search: int = 64
-    scope_policy: str = "private"
+    scope_policy: ScopePolicy = "private"
     cache_id: str = "default"
     generation: str = "default"
     policy_version: str = "safe-reuse-v1"
@@ -70,15 +76,9 @@ class CacheConfig:
     max_query_chars: int = 16384
     max_capture_bytes: int = 1048576
     embedder_revision: str = ""
-    model: str = ""
-    system_prompt: str = ""
-    temperature: float = -1.0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Validate configuration values after initialization."""
-        import re
-        import math
-
         for name in ("singleflight_enabled", "track_stats"):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"{name} must be a boolean")
@@ -139,10 +139,13 @@ class CacheConfig:
             raise ValueError(f"ttl_seconds must be >= 0, got {self.ttl_seconds}")
         if self.max_entries < 1:
             raise ValueError(f"max_entries must be >= 1, got {self.max_entries}")
-        if self.backend not in ("sqlite", "redis", "async_redis", "memory"):
+        if str(self.backend) == "async_redis":
             raise ValueError(
-                f"backend must be one of 'sqlite', 'redis', 'async_redis', 'memory', "
-                f"got '{self.backend}'"
+                "async_redis is not supported through LongCache; use AsyncRedisCacheBackend directly or configure backend='redis'"
+            )
+        if self.backend not in ("sqlite", "redis", "memory"):
+            raise ValueError(
+                f"backend must be one of 'sqlite', 'redis', 'memory', got '{self.backend}'"
             )
         if self.faiss_index_type not in ("flat", "hnsw"):
             raise ValueError("faiss_index_type must be 'flat' or 'hnsw'")
@@ -150,7 +153,7 @@ class CacheConfig:
             raise ValueError("hnsw_m and hnsw_ef_search must be positive")
 
     @classmethod
-    def from_dict(cls, data: dict) -> CacheConfig:
+    def from_dict(cls, data: Mapping[str, Any]) -> CacheConfig:
         """
         Create a CacheConfig from a dictionary.
 
@@ -166,7 +169,7 @@ class CacheConfig:
         unknown = set(data) - valid_keys
         if unknown:
             raise ValueError(f"Unknown configuration keys: {sorted(unknown)}")
-        return cls(**data)
+        return cls(**dict(data))
 
     @classmethod
     def from_env(cls, prefix: str = "LONGCACHE_") -> CacheConfig:
@@ -184,28 +187,53 @@ class CacheConfig:
             CacheConfig instance with values from environment variables.
         """
         field_types = {f.name: f.type for f in cls.__dataclass_fields__.values()}
-        env_values = {}
+        env_values: dict[str, Any] = {}
 
         for field_name in cls.__dataclass_fields__:
             env_key = f"{prefix}{field_name.upper()}"
             env_val = os.environ.get(env_key)
             if env_val is not None:
-                # Cast to appropriate type
                 field_type = field_types[field_name]
-                if field_type == "float":
+                if field_type == "float" or field_name == "similarity_threshold":
                     env_values[field_name] = float(env_val)
-                elif field_type == "int":
+                elif field_type == "int" or field_name in (
+                    "ttl_seconds",
+                    "max_entries",
+                    "verification_budget",
+                    "max_query_chars",
+                    "max_capture_bytes",
+                    "hnsw_m",
+                    "hnsw_ef_search",
+                    "shared_max_entries",
+                    "shared_max_leases",
+                    "shared_max_receipts",
+                    "shared_max_partitions",
+                    "shared_max_distinct_tags",
+                    "shared_max_tags_per_entry",
+                    "shared_max_tag_chars",
+                    "singleflight_max_inflight",
+                    "singleflight_max_waiters_per_key",
+                ):
                     env_values[field_name] = int(env_val)
-                elif field_type == "bool":
+                elif field_type == "bool" or field_name in ("track_stats", "singleflight_enabled"):
                     if env_val.lower() not in ("true", "1", "yes", "false", "0", "no"):
                         raise ValueError(f"Invalid boolean for {env_key}")
                     env_values[field_name] = env_val.lower() in ("true", "1", "yes")
+                elif field_name in (
+                    "backend_timeout_seconds",
+                    "shutdown_timeout_seconds",
+                    "shared_sync_timeout_seconds",
+                    "distributed_lease_seconds",
+                    "distributed_renew_interval_seconds",
+                    "singleflight_wait_timeout_seconds",
+                ):
+                    env_values[field_name] = float(env_val)
                 else:
                     env_values[field_name] = env_val
 
         return cls(**env_values)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """
         Convert the configuration to a dictionary.
 

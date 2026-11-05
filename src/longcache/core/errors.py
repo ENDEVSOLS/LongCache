@@ -1,5 +1,7 @@
 """Public reliability errors. Messages never contain request or dependency payloads."""
 
+from __future__ import annotations
+
 
 class CacheError(RuntimeError):
     """Base class for cache reliability failures."""
@@ -20,8 +22,8 @@ class CacheCapacityError(CacheError):
 class CacheOperationError(CacheError):
     """A recognized runtime cache dependency failed."""
 
-    def __init__(self, stage):
-        self.stage = stage
+    def __init__(self, stage: str) -> None:
+        self.stage: str = stage
         super().__init__(f"Cache operation failed at stage: {stage}")
 
 

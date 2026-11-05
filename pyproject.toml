@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "longcache"
-version = "0.4.0"
+version = "0.5.0"
 description = "Semantic similarity cache for LLM/RAG pipelines"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -123,9 +123,33 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.mypy]
 python_version = "3.11"
+strict = true
 warn_return_any = true
-warn_unused_configs = true
+warn_unused_configs = false
+files = ["src/longcache"]
+
+[[tool.mypy.overrides]]
+module = [
+    "faiss",
+    "faiss.*",
+    "sentence_transformers",
+    "sentence_transformers.*",
+    "torch",
+    "torch.*",
+    "redis",
+    "redis.*",
+    "openai",
+    "openai.*",
+    "numpy",
+    "numpy.*",
+    "click",
+    "click.*",
+]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["longcache.cli"]
+disallow_untyped_decorators = false
 
 [tool.uv.sources]
 torch = { index = "pytorch-cpu" }

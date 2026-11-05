@@ -1,45 +1,54 @@
 """Scoped semantic reuse with shared policy across sync and async entry points."""
 
 from __future__ import annotations
+
 import asyncio
 from collections import Counter, OrderedDict
+from collections.abc import Sequence
 from dataclasses import asdict, replace
 from functools import wraps
 import inspect
 import threading
 import time
+from typing import Any, Awaitable, Callable, ParamSpec, TypeVar, cast, overload
 
-from longcache.config import CacheConfig
 from longcache.backends.memory import InMemoryCacheBackend
 from longcache.backends.sqlite import SQLiteCacheBackend
+from longcache.config import CacheConfig
+
 from .base_embedder import BaseEmbedder
-from .decision import LookupDecision, StoreDecision
-from .embedding_contract import EmbeddingGuard, validate_vector
+from .decision import InspectionReport, LookupDecision, StoreDecision
+from .distributed_singleflight import DistributedExecution
 from .embedder import LocalEmbedder
+from .embedding_contract import EmbeddingGuard, validate_vector
 from .entry import CacheEntry
-from .identity import Instruction, RequestContext, canonical, digest
+from .errors import CacheClosedError, CacheOperationError
+from .execution import Execution
+from .identity import RequestContext, canonical, digest
 from .index import SimilarityIndex
 from .lifecycle import Lifecycle, managed
-from .errors import CacheClosedError
-from .errors import CacheOperationError
 from .observability import Observability
-from .reliability import dependency, decision_operation, operational, execution_operation
-from .execution import Execution
-from .distributed_singleflight import DistributedExecution
 from .policy import admit, decode_response, verify
+from .reliability import decision_operation, dependency, execution_operation, operational
+from .types import AdmissionHook, CachedCallable, MetricsSnapshot, StatsSnapshot, VerificationHook
+
+T = TypeVar("T")
+F = TypeVar("F", bound=Callable[..., Any])
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 class LongCache:
     def __init__(
         self,
-        config=None,
+        config: CacheConfig | None = None,
         *,
         embedder: BaseEmbedder | None = None,
-        admit=None,
-        verifier=None,
+        admit: AdmissionHook | None = None,
+        verifier: VerificationHook | None = None,
         context: RequestContext | None = None,
         metadata_only: bool = False,
-    ):
+    ) -> None:
         self.config = config or CacheConfig()
         for hook in (admit, verifier):
             if hook is not None and (
@@ -52,10 +61,11 @@ class LongCache:
             raise ValueError("context must be a RequestContext")
         self._metadata_only = metadata_only
         self.context = context
-        self._admit, self._verifier = admit, verifier
+        self._admit: Callable[..., Any] | None = admit
+        self._verifier: Callable[..., Any] | None = verifier
         self._mutation_lock = threading.RLock()
-        self._stats = Counter()
-        self._partition_stats = OrderedDict()
+        self._stats: Counter[str] = Counter()
+        self._partition_stats: OrderedDict[str, Counter[str]] = OrderedDict()
         self._stats_started_at = time.time()
         self._stats_evictions = 0
         self._closed = False
@@ -67,21 +77,22 @@ class LongCache:
         self._observability = Observability(self.config.track_stats, self.config.backend)
         self._ready = False
         self._stop_event = threading.Event()
-        self.embedder = (
+        self.embedder: BaseEmbedder = (
             embedder
             if embedder is not None
             else LocalEmbedder(self.config.embedder_model, self.config.embedder_revision)
         )
         self._embedding = EmbeddingGuard(self.embedder)
-        self.backend = self._init_backend()
+        self.backend: Any = self._init_backend()
         self.index = SimilarityIndex(self.backend, self.config)
         self._lifecycle = Lifecycle(
             self._finalize_resources, self._revoke_flights, self.config.shutdown_timeout_seconds
         )
         self._execution = Execution(self)
-        self._distributed_execution = (
+        self._distributed_execution: DistributedExecution | None = (
             DistributedExecution(self) if self.config.deployment_mode == "shared" else None
         )
+        self._fingerprint: str = ""
         # Metadata-only construction does not load/download model weights.
         try:
             if self._dependency("backend", self.backend.list_all_entries):
@@ -94,9 +105,10 @@ class LongCache:
             if hasattr(self.backend, "close"):
                 self.backend.close()
             raise
-        self._sweep_thread = None
+        self._sweep_thread: threading.Thread | None = None
         if (
             not metadata_only
+            and self.config.backend != "memory"
             and (self.config.ttl_seconds or self.config.deployment_mode == "shared")
             and hasattr(self.backend, "sweep_expired")
         ):
@@ -105,7 +117,7 @@ class LongCache:
             )
             self._sweep_thread.start()
 
-    def _init_backend(self):
+    def _init_backend(self) -> Any:
         c = self.config
         if c.backend == "memory":
             return InMemoryCacheBackend(c.max_entries)
@@ -142,13 +154,13 @@ class LongCache:
             )
         raise ValueError("async_redis is not supported through LongCache; use a supported backend")
 
-    def _ensure_open(self):
+    def _ensure_open(self) -> None:
         self._lifecycle.ensure_open()
 
-    def _dependency(self, stage, function, *args, **kwargs):
+    def _dependency(self, stage: str, function: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         return dependency(self, stage, function, *args, **kwargs)
 
-    def _ensure_ready(self):
+    def _ensure_ready(self) -> None:
         with self._mutation_lock:
             self._ensure_open()
             if not self._coherent:
@@ -191,10 +203,10 @@ class LongCache:
                     self._shared_revision = before
                 self._ready = True
 
-    def _rebuild_index_from_backend(self):
+    def _rebuild_index_from_backend(self) -> None:
         if self._metadata_only:
             return
-        entries = []
+        entries: list[CacheEntry] = []
         for entry in self._dependency("backend", self.backend.list_all_entries):
             metadata = entry.metadata
             if metadata.get("format") != 2 or metadata.get("embedding") != self._fingerprint:
@@ -206,7 +218,7 @@ class LongCache:
             entries.append(entry)
         self._dependency("index", self.index.rebuild, entries)
 
-    def _synchronize_shared(self):
+    def _synchronize_shared(self) -> None:
         """Never search a local index without checking authoritative Redis state."""
         if self.config.deployment_mode != "shared":
             return
@@ -216,7 +228,7 @@ class LongCache:
                 before = self._dependency("backend", self.backend.revision)
                 if self._shared_revision == before:
                     return
-                if self._shared_revision >= 0 and self._shared_revision < before:
+                if 0 <= self._shared_revision < before:
                     cursor = self._shared_revision
                     complete = True
                     while cursor < before and complete:
@@ -260,24 +272,18 @@ class LongCache:
                 if time.monotonic() >= deadline:
                     raise CacheOperationError("synchronization")
 
-    def _prepare(self, query, context, namespace, legacy, *, _initialize=True):
+    def _prepare(
+        self,
+        query: str,
+        context: RequestContext | None,
+        namespace: str | None,
+        *,
+        _initialize: bool = True,
+    ) -> tuple[tuple[RequestContext, str, str] | None, str | None]:
         self._ensure_open()
-        if context is not None and any(value is not None for value in legacy.values()):
-            raise ValueError("Legacy context keywords cannot override RequestContext")
         ctx = context if context is not None else self.context
         if not isinstance(ctx, RequestContext):
             return None, "missing_identity"
-        if any(value is not None for value in legacy.values()):
-            updates = {}
-            if legacy.get("model") is not None:
-                updates["model"] = legacy["model"]
-            if legacy.get("system_prompt") is not None:
-                updates["instructions"] = (Instruction("system", legacy["system_prompt"]),)
-            if legacy.get("temperature") is not None:
-                updates["generation"] = dict(ctx.generation) | {
-                    "temperature": legacy["temperature"]
-                }
-            ctx = replace(ctx, **updates)
         policy = self.config.scope_policy
         if policy != "public" and (
             ctx.scope is None or (policy == "private" and not ctx.scope.user_id)
@@ -306,49 +312,52 @@ class LongCache:
         partition = "v2:" + digest(record)
         return (ctx, partition, identity), None
 
-    def _account(self, partition, outcome):
+    def _account(self, partition: str, outcome: str) -> None:
         if self.config.track_stats:
             self._stats[outcome] += 1
             if partition not in self._partition_stats:
                 if len(self._partition_stats) >= 1024:
                     self._partition_stats.popitem(last=False)
                     self._stats_evictions += 1
-                self._partition_stats[partition] = Counter(_started_at=time.time())
+                self._partition_stats[partition] = Counter()
+                self._partition_stats[partition]["_started_at"] = int(time.time())
             self._partition_stats.move_to_end(partition)
             self._partition_stats[partition][outcome] += 1
 
-    @managed
-    @decision_operation("lookup")
     def lookup(
         self,
-        query,
-        namespace=None,
+        query: str,
+        namespace: str | None = None,
         *,
-        context=None,
-        model=None,
-        system_prompt=None,
-        temperature=None,
-        _inspect=False,
-        _record=True,
-        _cancel=None,
-    ):
+        context: RequestContext | None = None,
+    ) -> LookupDecision:
+        return cast(LookupDecision, self._lookup(query, namespace, context=context))
+
+    @managed
+    @decision_operation("lookup")
+    def _lookup(
+        self,
+        query: str,
+        namespace: str | None = None,
+        *,
+        context: RequestContext | None = None,
+        _inspect: bool = False,
+        _record: bool = True,
+        _cancel: Any = None,
+        _internal: bool = False,
+    ) -> LookupDecision:
         _cancel = _cancel or self._lifecycle.current
         if self._metadata_only:
             raise ValueError("Vector operations require a normal cache instance")
-        prepared, reason = self._prepare(
-            query,
-            context,
-            namespace,
-            dict(model=model, system_prompt=system_prompt, temperature=temperature),
-        )
+        prepared, reason = self._prepare(query, context, namespace)
         threshold = self.config.similarity_threshold
-        if reason:
-            return LookupDecision("BYPASS", reason, threshold=threshold)
+        if reason or prepared is None:
+            return LookupDecision("BYPASS", reason or "missing_identity", threshold=threshold)
         ctx, partition, identity = prepared
         self._synchronize_shared()
         with self._mutation_lock:
             if self.index.size == 0:
-                if not _inspect and _record and not _cancel.is_set():
+                if not _inspect and _record and not (_cancel and _cancel.is_set()):
                     self._account(partition, "misses")
                 return LookupDecision("MISS", "no_candidate", threshold=threshold)
         vector = self._dependency("embedding", self._embedding.embed, query)
@@ -452,74 +461,97 @@ class LongCache:
                     self._account(partition, "misses")
         return LookupDecision("MISS", reason, similarity=last_score, threshold=threshold)
 
-    async def _async(self, method, *args, **kwargs):
+    async def _async(self, method: Callable[..., T], *args: Any, **kwargs: Any) -> T:
         return await self._lifecycle.call(method, *args, **kwargs)
 
-    async def alookup(self, query, namespace=None, **kwargs):
-        return await self._async(self.lookup, query, namespace, **kwargs)
+    async def alookup(
+        self,
+        query: str,
+        namespace: str | None = None,
+        *,
+        context: RequestContext | None = None,
+    ) -> LookupDecision:
+        return await self._async(self.lookup, query, namespace, context=context)
+
+    async def _alookup(
+        self,
+        query: str,
+        namespace: str | None = None,
+        *,
+        context: RequestContext | None = None,
+        _inspect: bool = False,
+        _record: bool = True,
+        _cancel: Any = None,
+        _internal: bool = False,
+    ) -> LookupDecision:
+        kwargs: dict[str, Any] = {
+            "context": context,
+            "_inspect": _inspect,
+            "_record": _record,
+            "_internal": _internal,
+        }
+        if _cancel is not None:
+            kwargs["_cancel"] = _cancel
+        return await self._async(self._lookup, query, namespace, **kwargs)
 
     def get(
         self,
-        query,
-        namespace=None,
-        model=None,
-        system_prompt=None,
-        temperature=None,
-        track_miss=True,
+        query: str,
+        namespace: str | None = None,
         *,
-        context=None,
-    ):
-        return self.lookup(
-            query,
-            namespace,
-            context=context,
-            model=model,
-            system_prompt=system_prompt,
-            temperature=temperature,
-        ).response
+        context: RequestContext | None = None,
+    ) -> Any:
+        return self.lookup(query, namespace, context=context).response
 
     async def aget(
         self,
-        query,
-        namespace=None,
-        model=None,
-        system_prompt=None,
-        temperature=None,
-        track_miss=True,
+        query: str,
+        namespace: str | None = None,
         *,
-        context=None,
-    ):
-        return (
-            await self.alookup(
+        context: RequestContext | None = None,
+    ) -> Any:
+        return (await self.alookup(query, namespace, context=context)).response
+
+    def set(
+        self,
+        query: str,
+        response: Any,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Sequence[str] | None = None,
+        *,
+        context: RequestContext | None = None,
+    ) -> StoreDecision:
+        return cast(
+            StoreDecision,
+            self._set(
                 query,
+                response,
                 namespace,
+                ttl=ttl,
+                tags=tags,
                 context=context,
-                model=model,
-                system_prompt=system_prompt,
-                temperature=temperature,
-            )
-        ).response
+            ),
+        )
 
     @managed
     @decision_operation("store")
-    def set(
+    def _set(
         self,
-        query,
-        response,
-        namespace=None,
-        ttl=None,
-        tags=None,
-        model=None,
-        system_prompt=None,
-        temperature=None,
+        query: str,
+        response: Any,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
         *,
-        context=None,
-        _cancel=None,
-        _expected_epoch=None,
-        _expected_shared_epoch=None,
-        _lease_key="",
-        _lease_token="",
-    ):
+        context: RequestContext | None = None,
+        _cancel: Any = None,
+        _expected_epoch: int | None = None,
+        _expected_shared_epoch: int | None = None,
+        _lease_key: str = "",
+        _lease_token: str = "",
+        _internal: bool = False,
+    ) -> StoreDecision:
         _cancel = _cancel or self._lifecycle.current
         if _expected_epoch is None:
             with self._mutation_lock:
@@ -528,14 +560,9 @@ class LongCache:
             _expected_shared_epoch = self._dependency("backend", self.backend.epoch)
         if self._metadata_only:
             raise ValueError("Vector operations require a normal cache instance")
-        prepared, reason = self._prepare(
-            query,
-            context,
-            namespace,
-            dict(model=model, system_prompt=system_prompt, temperature=temperature),
-        )
-        if reason:
-            return StoreDecision("REJECTED", reason)
+        prepared, reason = self._prepare(query, context, namespace)
+        if reason or prepared is None:
+            return StoreDecision("REJECTED", reason or "missing_identity")
         ctx, partition, identity = prepared
         payload, decision = self._dependency("admission", admit, response, ctx, self._admit)
         self._observability.count(
@@ -587,7 +614,7 @@ class LongCache:
                 if self.config.deployment_mode == "shared":
                     identifier, commit_revision = self._dependency(
                         "store",
-                        self.backend.store,
+                        self.backend.store_shared,
                         entry,
                         expected_epoch=_expected_shared_epoch,
                         lease_key=_lease_key,
@@ -624,86 +651,208 @@ class LongCache:
                 raise
         return StoreDecision("STORED", "accepted", identifier)
 
-    async def aset(self, query, response, namespace=None, **kwargs):
-        return await self._async(self.set, query, response, namespace, **kwargs)
+    async def aset(
+        self,
+        query: str,
+        response: Any,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Sequence[str] | None = None,
+        *,
+        context: RequestContext | None = None,
+    ) -> StoreDecision:
+        return await self._async(
+            self.set,
+            query,
+            response,
+            namespace,
+            ttl=ttl,
+            tags=tags,
+            context=context,
+        )
 
-    @execution_operation
+    async def _aset(
+        self,
+        query: str,
+        response: Any,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
+        *,
+        context: RequestContext | None = None,
+        _cancel: Any = None,
+        _expected_epoch: int | None = None,
+        _expected_shared_epoch: int | None = None,
+        _lease_key: str = "",
+        _lease_token: str = "",
+        _internal: bool = False,
+    ) -> StoreDecision:
+        kwargs: dict[str, Any] = {
+            "ttl": ttl,
+            "tags": tags,
+            "context": context,
+            "_expected_epoch": _expected_epoch,
+            "_expected_shared_epoch": _expected_shared_epoch,
+            "_lease_key": _lease_key,
+            "_lease_token": _lease_token,
+            "_internal": _internal,
+        }
+        if _cancel is not None:
+            kwargs["_cancel"] = _cancel
+        return await self._async(self._set, query, response, namespace, **kwargs)
+
     def get_or_compute(
         self,
-        query,
-        compute,
+        query: str,
+        compute: Callable[[], T],
         *,
-        context=None,
-        namespace=None,
-        ttl=None,
-        tags=None,
-        _entry_point="manual",
-    ):
+        context: RequestContext | None = None,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Sequence[str] | None = None,
+    ) -> T:
         """Reuse a verified answer or coordinate one exact scoped computation."""
-        if self._distributed_execution is not None:
-            return self._distributed_execution.run(
-                query,
-                compute,
-                context=context,
-                namespace=namespace,
-                ttl=ttl,
-                tags=tags,
-                entry_point=_entry_point,
-            )
-        return self._execution.run(
+        return self._run_compute(
             query,
             compute,
             context=context,
             namespace=namespace,
             ttl=ttl,
             tags=tags,
-            _entry_point=_entry_point,
+            _entry_point="manual",
         )
 
     @execution_operation
-    async def aget_or_compute(
+    def _run_compute(
         self,
-        query,
-        compute,
+        query: str,
+        compute: Callable[[], T],
         *,
-        context=None,
-        namespace=None,
-        ttl=None,
-        tags=None,
-        _entry_point="manual",
-    ):
-        """Async equivalent; followers await without occupying worker threads."""
+        context: RequestContext | None = None,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
+        _entry_point: str = "manual",
+    ) -> T:
         if self._distributed_execution is not None:
-            return await self._distributed_execution.arun(
+            return cast(
+                T,
+                self._distributed_execution.run(
+                    query,
+                    compute,
+                    context=context,
+                    namespace=namespace,
+                    ttl=ttl,
+                    tags=tags,
+                    entry_point=_entry_point,
+                ),
+            )
+        return cast(
+            T,
+            self._execution.run(
                 query,
                 compute,
                 context=context,
                 namespace=namespace,
                 ttl=ttl,
                 tags=tags,
-                entry_point=_entry_point,
-            )
-        return await self._execution.arun(
+                _entry_point=_entry_point,
+            ),
+        )
+
+    async def aget_or_compute(
+        self,
+        query: str,
+        compute: Callable[[], Awaitable[T]],
+        *,
+        context: RequestContext | None = None,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Sequence[str] | None = None,
+    ) -> T:
+        """Async equivalent; followers await without occupying worker threads."""
+        return await self._arun_compute(
             query,
             compute,
             context=context,
             namespace=namespace,
             ttl=ttl,
             tags=tags,
-            _entry_point=_entry_point,
+            _entry_point="manual",
         )
+
+    @execution_operation
+    async def _arun_compute(
+        self,
+        query: str,
+        compute: Callable[[], Awaitable[T]],
+        *,
+        context: RequestContext | None = None,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Any = None,
+        _entry_point: str = "manual",
+    ) -> T:
+        if self._distributed_execution is not None:
+            return cast(
+                T,
+                await self._distributed_execution.arun(
+                    query,
+                    compute,
+                    context=context,
+                    namespace=namespace,
+                    ttl=ttl,
+                    tags=tags,
+                    entry_point=_entry_point,
+                ),
+            )
+        return cast(
+            T,
+            await self._execution.arun(
+                query,
+                compute,
+                context=context,
+                namespace=namespace,
+                ttl=ttl,
+                tags=tags,
+                _entry_point=_entry_point,
+            ),
+        )
+
+    @overload
+    def cached(
+        self,
+        func: Callable[P, R],
+        *,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Sequence[str] | None = None,
+        context: RequestContext | None = None,
+        context_resolver: Callable[..., RequestContext | None] | None = None,
+    ) -> CachedCallable[P, R]: ...
+
+    @overload
+    def cached(
+        self,
+        func: None = None,
+        *,
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Sequence[str] | None = None,
+        context: RequestContext | None = None,
+        context_resolver: Callable[..., RequestContext | None] | None = None,
+    ) -> Callable[[Callable[P, R]], CachedCallable[P, R]]: ...
 
     def cached(
         self,
-        func=None,
+        func: Callable[..., Any] | None = None,
         *,
-        namespace=None,
-        ttl=None,
-        tags=None,
-        context=None,
-        context_resolver=None,
-        **legacy,
-    ):
+        namespace: str | None = None,
+        ttl: int | None = None,
+        tags: Sequence[str] | None = None,
+        context: RequestContext | None = None,
+        context_resolver: Callable[..., RequestContext | None] | None = None,
+    ) -> Any:
         if context_resolver is not None and (
             not callable(context_resolver)
             or inspect.iscoroutinefunction(context_resolver)
@@ -711,8 +860,8 @@ class LongCache:
         ):
             raise ValueError("Context resolvers must be synchronous callables")
 
-        def decorate(fn):
-            def context_for(base):
+        def decorate(fn: Callable[..., Any]) -> Any:
+            def context_for(base: RequestContext | None) -> RequestContext | None:
                 if not isinstance(base, RequestContext):
                     if inspect.iscoroutine(base):
                         base.close()
@@ -721,7 +870,7 @@ class LongCache:
                     base, operation=base.operation + ":" + fn.__module__ + "." + fn.__qualname__
                 )
 
-            def resolve(args, kwargs):
+            def resolve(args: tuple[Any, ...], kwargs: dict[str, Any]) -> RequestContext | None:
                 if context_resolver is None:
                     return context_for(context or self.context)
                 try:
@@ -732,8 +881,8 @@ class LongCache:
             if inspect.iscoroutinefunction(fn):
 
                 @wraps(fn)
-                async def async_wrapper(query, *args, **kwargs):
-                    if args or kwargs or legacy:
+                async def async_wrapper(query: str, *args: Any, **kwargs: Any) -> Any:
+                    if args or kwargs:
                         return await self._apass_through(
                             lambda: fn(query, *args, **kwargs), "unsupported_parameter", "decorator"
                         )
@@ -742,7 +891,7 @@ class LongCache:
                         return await self._apass_through(
                             lambda: fn(query), "missing_identity", "decorator"
                         )
-                    return await self.aget_or_compute(
+                    return await self._arun_compute(
                         query,
                         lambda: fn(query),
                         context=ctx,
@@ -752,19 +901,19 @@ class LongCache:
                         _entry_point="decorator",
                     )
 
-                async_wrapper.cache_context_for = context_for
+                async_wrapper.cache_context_for = context_for  # type: ignore[attr-defined]
                 return async_wrapper
 
             @wraps(fn)
-            def wrapper(query, *args, **kwargs):
-                if args or kwargs or legacy:
+            def wrapper(query: str, *args: Any, **kwargs: Any) -> Any:
+                if args or kwargs:
                     return self._pass_through(
                         lambda: fn(query, *args, **kwargs), "unsupported_parameter", "decorator"
                     )
                 ctx = resolve((query,), {})
                 if ctx is None:
                     return self._pass_through(lambda: fn(query), "missing_identity", "decorator")
-                return self.get_or_compute(
+                return self._run_compute(
                     query,
                     lambda: fn(query),
                     context=ctx,
@@ -774,13 +923,13 @@ class LongCache:
                     _entry_point="decorator",
                 )
 
-            wrapper.cache_context_for = context_for
+            wrapper.cache_context_for = context_for  # type: ignore[attr-defined]
             return wrapper
 
         return decorate(func) if func is not None else decorate
 
     @execution_operation
-    def _pass_through(self, compute, reason, entry_point):
+    def _pass_through(self, compute: Callable[[], Any], reason: str, entry_point: str) -> Any:
         with self._lifecycle.operation():
             result = self._execution.origin(compute)
             return self._execution.finish(
@@ -796,7 +945,9 @@ class LongCache:
             )
 
     @execution_operation
-    async def _apass_through(self, compute, reason, entry_point):
+    async def _apass_through(
+        self, compute: Callable[[], Any], reason: str, entry_point: str
+    ) -> Any:
         with self._lifecycle.operation():
             result = await self._execution.aorigin(compute)
             return await self._execution.afinish(
@@ -811,25 +962,39 @@ class LongCache:
                 reason=reason,
             )
 
-    def cached_stream(self, func=None, **kwargs):
+    def cached_stream(self, func: Any = None, **kwargs: Any) -> Any:
         # Preserve the generator interface while unsupported replay remains pass-through.
         return func if func is not None else lambda fn: fn
 
-    def inspect(self, query, namespace=None, *, context=None, **legacy):
-        return self.lookup(
-            query, namespace, context=context, _inspect=True, _internal=True, **legacy
-        ).inspection()
+    def inspect(
+        self,
+        query: str,
+        namespace: str | None = None,
+        *,
+        context: RequestContext | None = None,
+    ) -> InspectionReport:
+        return cast(
+            InspectionReport,
+            self._lookup(
+                query, namespace, context=context, _inspect=True, _internal=True
+            ).inspection(),
+        )
 
     @managed
-    def invalidate(self, namespace=None, *, context=None, **legacy):
-        prepared, reason = self._prepare("maintenance", context, namespace, legacy)
-        if reason:
+    def invalidate(
+        self,
+        namespace: str | None = None,
+        *,
+        context: RequestContext | None = None,
+    ) -> int:
+        prepared, reason = self._prepare("maintenance", context, namespace)
+        if reason or prepared is None:
             return 0
         with self._mutation_lock:
             try:
                 self._epoch += 1
                 self._execution.registry.abort()
-                count = self._dependency("store", self.backend.delete_namespace, prepared[1])
+                count = int(self._dependency("store", self.backend.delete_namespace, prepared[1]))
                 revision = (
                     self._dependency("backend", self.backend.revision)
                     if self.config.deployment_mode == "shared"
@@ -846,15 +1011,21 @@ class LongCache:
                 raise
 
     @managed
-    def invalidate_by_tag(self, tag, namespace=None, *, context=None, **legacy):
-        prepared, reason = self._prepare("maintenance", context, namespace, legacy)
-        if reason:
+    def invalidate_by_tag(
+        self,
+        tag: str,
+        namespace: str | None = None,
+        *,
+        context: RequestContext | None = None,
+    ) -> int:
+        prepared, reason = self._prepare("maintenance", context, namespace)
+        if reason or prepared is None:
             return 0
         with self._mutation_lock:
             try:
                 self._epoch += 1
                 self._execution.registry.abort()
-                count = self._dependency("store", self.backend.delete_by_tag, tag, prepared[1])
+                count = int(self._dependency("store", self.backend.delete_by_tag, tag, prepared[1]))
                 revision = (
                     self._dependency("backend", self.backend.revision)
                     if self.config.deployment_mode == "shared"
@@ -871,7 +1042,7 @@ class LongCache:
                 raise
 
     @managed
-    def clear(self, *, operator=False):
+    def clear(self, *, operator: bool = False) -> int:
         self._ensure_open()
         if not operator:
             raise ValueError("Clearing all partitions requires explicit operator=True")
@@ -879,7 +1050,7 @@ class LongCache:
             try:
                 self._epoch += 1
                 self._execution.registry.abort()
-                count = self._dependency("store", self.backend.clear)
+                count = int(self._dependency("store", self.backend.clear))
                 revision = (
                     self._dependency("backend", self.backend.revision)
                     if self.config.deployment_mode == "shared"
@@ -896,29 +1067,43 @@ class LongCache:
                 raise
 
     @managed
-    def entries(self, namespace=None, *, context=None, operator=False):
+    def entries(
+        self,
+        namespace: str | None = None,
+        *,
+        context: RequestContext | None = None,
+        operator: bool = False,
+    ) -> list[CacheEntry]:
         self._ensure_open()
         with self._mutation_lock:
             if operator:
-                return self.backend.list_all_entries()
-            prepared, reason = self._prepare("maintenance", context, namespace, {})
-            return [] if reason else self.backend.list_entries(prepared[1])
+                return list(self.backend.list_all_entries())
+            prepared, reason = self._prepare("maintenance", context, namespace)
+            return (
+                [] if reason or prepared is None else list(self.backend.list_entries(prepared[1]))
+            )
 
     @managed
-    def stats(self, *, context=None, namespace=None, operator=False):
+    def stats(
+        self,
+        *,
+        context: RequestContext | None = None,
+        namespace: str | None = None,
+        operator: bool = False,
+    ) -> StatsSnapshot:
         self._ensure_open()
         with self._mutation_lock:
             if operator:
                 counts = self._stats.copy()
                 total = len(self.backend.list_all_entries())
             else:
-                prepared, reason = self._prepare("maintenance", context, namespace, {})
+                prepared, reason = self._prepare("maintenance", context, namespace)
                 counts = (
                     Counter()
-                    if reason
+                    if reason or prepared is None
                     else self._partition_stats.get(prepared[1], Counter()).copy()
                 )
-                total = 0 if reason else self.backend.count(prepared[1])
+                total = 0 if reason or prepared is None else self.backend.count(prepared[1])
             hits, misses = counts["hits"], counts["misses"]
             return {
                 "hits": hits,
@@ -934,8 +1119,8 @@ class LongCache:
                 "stats_retention_evictions": self._stats_evictions,
             }
 
-    def _sweep(self):
-        delay, failures = 60, 0
+    def _sweep(self) -> None:
+        delay, failures = 60.0, 0
         while not self._stop_event.wait(delay):
             try:
                 with self._lifecycle.operation(), self._mutation_lock:
@@ -957,40 +1142,49 @@ class LongCache:
                     self._background_failed = True
                     return
                 failures += 1
-                delay = min(60, 2 ** min(failures - 1, 6))
+                delay = float(min(60, 2 ** min(failures - 1, 6)))
             else:
-                delay, failures = 60, 0
+                delay, failures = 60.0, 0
 
-    def metrics(self, *, operator=False):
+    def metrics(self, *, operator: bool = False) -> MetricsSnapshot:
         """Return process-wide redacted measurements without backend I/O."""
         if not operator:
             raise ValueError("Process-wide metrics require operator=True")
+        obs = self._observability.snapshot()
+        life = self._lifecycle.snapshot()
+        reg = self._execution.registry.snapshot()
         return {
-            **self._observability.snapshot(),
+            "enabled": bool(obs["enabled"]),
+            "counters": obs["counters"],
+            "latency": obs["latency"],
             "resources": {
-                **self._lifecycle.snapshot(),
-                **self._execution.registry.snapshot(),
+                "state": str(life["state"]),
+                "active_operations": int(life["active_operations"]),
+                "cache_jobs": int(life["cache_jobs"]),
+                "cleanup_failed": bool(life["cleanup_failed"]),
+                "cleanup_workers": int(life["cleanup_workers"]),
+                "active_flights": int(reg["active_flights"]),
+                "followers": int(reg["followers"]),
+                "retained_replay_bytes": int(reg["retained_replay_bytes"]),
                 "sqlite_connections": int(getattr(self.backend, "_connection", None) is not None),
             },
             "health": "degraded"
-            if not self._coherent
-            or self._background_failed
-            or self._lifecycle.snapshot()["cleanup_failed"]
+            if not self._coherent or self._background_failed or life["cleanup_failed"]
             else "healthy",
         }
 
-    def _revoke_flights(self):
+    def _revoke_flights(self) -> None:
         if hasattr(self, "_execution"):
             self._execution.shutdown()
 
-    def _finalize_resources(self):
+    def _finalize_resources(self) -> None:
         if self._sweep_thread is not None and self._sweep_thread is not threading.current_thread():
             self._sweep_thread.join()
         if hasattr(self.backend, "close"):
             self.backend.close()
         self._closed = True
 
-    def close(self, timeout=None):
+    def close(self, timeout: float | None = None) -> None:
         if self._lifecycle.current is not None:
             raise CacheClosedError("Cannot close the cache from its own active operation")
         try:
@@ -1003,17 +1197,17 @@ class LongCache:
         self._stop_event.set()
         self._lifecycle.close(timeout)
 
-    async def aclose(self, timeout=None):
+    async def aclose(self, timeout: float | None = None) -> None:
         if self._lifecycle.current is not None:
             raise CacheClosedError("Cannot close the cache from its own active operation")
         self._stop_event.set()
         await self._lifecycle.aclose(timeout)
 
-    def __enter__(self):
+    def __enter__(self) -> LongCache:
         self._ensure_open()
         return self
 
-    def __exit__(self, exc_type, exc, traceback):
+    def __exit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         try:
             self.close()
         except Exception:
@@ -1021,11 +1215,11 @@ class LongCache:
             if exc is None:
                 raise
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> LongCache:
         self._ensure_open()
         return self
 
-    async def __aexit__(self, exc_type, exc, traceback):
+    async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
         try:
             await self.aclose()
         except Exception:
@@ -1033,5 +1227,5 @@ class LongCache:
             if exc is None:
                 raise
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"LongCache(backend={self.config.backend!r}, format=2)"

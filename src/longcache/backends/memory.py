@@ -8,12 +8,14 @@ Supports TTL expiry and namespace isolation.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
-from typing import Optional
+from typing import Any, Optional
 
 from longcache.backends.base import AbstractCacheBackend
 from longcache.core.entry import CacheEntry
+from longcache.core.identity import canonical
 
 
 class InMemoryCacheBackend(AbstractCacheBackend):
@@ -30,7 +32,7 @@ class InMemoryCacheBackend(AbstractCacheBackend):
         result = backend.retrieve(entry_id)
     """
 
-    def __init__(self, max_entries: int = 10_000):
+    def __init__(self, max_entries: int = 10_000) -> None:
         """
         Initialize the in-memory backend.
 
@@ -39,20 +41,22 @@ class InMemoryCacheBackend(AbstractCacheBackend):
         """
         self._max_entries = max_entries
         self._entries: dict[int, CacheEntry] = {}
-        self._next_id = 1
+        self._next_id: int = 1
+        self._manifest: str | None = None
         self._lock = threading.RLock()
 
-    def read_manifest(self):
-        import json
+    def read_manifest(self) -> dict[str, Any] | None:
+        if self._manifest is None:
+            return None
+        parsed: Any = json.loads(self._manifest)
+        if isinstance(parsed, dict):
+            return parsed
+        return None
 
-        return json.loads(self._manifest) if hasattr(self, "_manifest") else None
-
-    def ensure_manifest(self, manifest: dict) -> None:
-        from longcache.core.identity import canonical
-
+    def ensure_manifest(self, manifest: dict[str, Any]) -> None:
         with self._lock:
             encoded = canonical(manifest)
-            if hasattr(self, "_manifest") and self._manifest != encoded:
+            if self._manifest is not None and self._manifest != encoded:
                 raise ValueError("Incompatible embedding or storage generation")
             self._manifest = encoded
 

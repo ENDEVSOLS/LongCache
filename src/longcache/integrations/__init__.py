@@ -1,12 +1,16 @@
 """Integrations with LLM frameworks."""
 
-from longcache.integrations.langchain import CachedLLM, CachedChain
+from __future__ import annotations
 
-__all__ = ["CachedLLM", "CachedChain"]
+from typing import Any
+
+from longcache.integrations.langchain import CachedChain, CachedLLM
+
+__all__ = ["CachedLLM", "CachedChain", "get_llamaindex_wrapper", "get_openai_wrapper"]
 
 
 # Lazy imports for optional integrations
-def get_llamaindex_wrapper():
+def get_llamaindex_wrapper() -> type[Any]:
     """Import and return CachedQueryEngine. Raises ImportError if llama-index is not installed."""
     try:
         from longcache.integrations.llamaindex import CachedQueryEngine
@@ -19,7 +23,7 @@ def get_llamaindex_wrapper():
         )
 
 
-def get_openai_wrapper():
+def get_openai_wrapper() -> type[Any]:
     """Import and return CachedOpenAI. Raises ImportError if openai is not installed."""
     try:
         from longcache.integrations.openai import CachedOpenAI

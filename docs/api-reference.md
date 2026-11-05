@@ -63,7 +63,7 @@
 | `shared_max_tag_chars` | `256` |
 | `distributed_lease_seconds`, `distributed_renew_interval_seconds` | `15.0`, `5.0` |
 
-Legacy model/prompt/temperature fields are insufficient to establish trusted request identity. Explicit-context calls reject conflicting legacy keywords. Calls with a fixed cache context may map compatible legacy per-call keywords into that context; use `RequestContext` for new code.
+Legacy `model`, `system_prompt`, `temperature`, and `track_miss` parameters were removed in v0.5.0; supply execution identity explicitly via `RequestContext`. See [Upgrading to v0.5](migration-v0.5.md) and the [Support Matrix](support-matrix.md) for public API stability classifications (`PUBLIC_API_STABILITY`).
 
 ## Policy and embedding interfaces
 
@@ -71,7 +71,7 @@ Legacy model/prompt/temperature fields are insufficient to establish trusted req
 
 `BaseEmbedder` requires `dimension`, `embed(text)`, and a stable `EmbeddingDescriptor(model, revision, dimension, preprocessing, normalization)`. Single vectors and batches must be contiguous float32 arrays with finite, L2-normalized rows and the declared dimension. Empty batches must have shape `(0, dimension)` and float32 dtype; they do not bypass dtype validation. The default batch implementation supports empty batches. Calls are serialized per embedder; malformed or incompatible vectors are rejected.
 
-See [architecture](how-it-works/architecture.md), [v0.3 migration](migration-v0.3.md), and the [support matrix](index.md#supported-integrations) for limits.
+See [architecture](how-it-works/architecture.md), [v0.5 migration](migration-v0.5.md), [v0.3 migration](migration-v0.3.md), and the [support matrix](support-matrix.md) for limits.
 
 For a decorated function, `answer.cache_context_for(base_context)` returns its immutable derived operation context. Use it for inspection, exports, or invalidation of that function's entries. Fixed contexts and per-call resolver contexts use the same derivation.
 

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
 import json
 import math
-from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .types import InstructionRole
 
 
 def freeze(value: Any) -> Any:
@@ -50,22 +53,22 @@ class RequestScope:
     tenant_id: str
     user_id: str | None = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if type(self.tenant_id) is not str or not self.tenant_id.strip():
             raise ValueError("A trusted nonempty tenant identifier is required")
         if self.user_id is not None and (type(self.user_id) is not str or not self.user_id.strip()):
             raise ValueError("User identifier must be nonempty when supplied")
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "RequestScope(<redacted>)"
 
 
 @dataclass(frozen=True)
 class Instruction:
-    role: str
+    role: InstructionRole
     content: str = field(repr=False)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.role not in ("system", "developer") or type(self.content) is not str:
             raise ValueError("Instructions require a supported role and text content")
 
@@ -87,7 +90,7 @@ class RequestContext:
     request_shape: str = "single-turn-text"
     codec: str = "json-v1"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         for name in (
             "operation",
             "provider",
@@ -124,7 +127,7 @@ class RequestContext:
         object.__setattr__(self, "document_versions", freeze(self.document_versions))
         object.__setattr__(self, "protected_entities", tuple(self.protected_entities))
 
-    def record(self, namespace: str, sharing: str, embedding: str, policy: str) -> dict:
+    def record(self, namespace: str, sharing: str, embedding: str, policy: str) -> dict[str, Any]:
         scope = self.scope
         scope_value = None
         if sharing != "public" and scope is not None:

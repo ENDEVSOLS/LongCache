@@ -1,16 +1,19 @@
 """Conservative admission, strict response codecs and explainable local verification."""
 
 from __future__ import annotations
+
+from decimal import Decimal
 import inspect
 import json
 import re
-from decimal import Decimal
+from typing import Any, Callable
+
 from .decision import PolicyDecision
 from .identity import freeze
 
 
-def strict_json(value):
-    def check(item):
+def strict_json(value: Any) -> Any:
+    def check(item: Any) -> None:
         if item is None or type(item) in (str, bool, int, float):
             return
         if type(item) is list:
@@ -29,7 +32,7 @@ def strict_json(value):
     return json.loads(encoded)
 
 
-def encode_response(response, codec):
+def encode_response(response: Any, codec: str) -> Any:
     if response is None or isinstance(response, BaseException):
         raise ValueError("No complete response")
     if codec == "json-v1":
@@ -60,7 +63,7 @@ def encode_response(response, codec):
     return data
 
 
-def decode_response(payload, codec):
+def decode_response(payload: Any, codec: str) -> Any:
     if codec == "openai-sdk-v1":
         from openai.types.chat import ChatCompletion
 
@@ -70,7 +73,7 @@ def decode_response(payload, codec):
     return encode_response(payload, codec)
 
 
-def call_hook(hook, *args):
+def call_hook(hook: Callable[..., Any], *args: Any) -> PolicyDecision:
     try:
         result = hook(*args)
         if inspect.isawaitable(result):
@@ -84,7 +87,9 @@ def call_hook(hook, *args):
         return PolicyDecision("reject", "hook_failed")
 
 
-def admit(response, context, hook=None):
+def admit(
+    response: Any, context: Any, hook: Callable[..., Any] | None = None
+) -> tuple[Any, PolicyDecision]:
     try:
         payload = encode_response(response, context.codec)
     except (ValueError, TypeError, ImportError, AttributeError):
@@ -118,7 +123,7 @@ _RELATIONS = (
 )
 
 
-def numbers(text):
+def numbers(text: str) -> list[tuple[str, str]]:
     result = []
     units = {
         "$": "usd",
@@ -144,7 +149,14 @@ def numbers(text):
     return sorted(result)
 
 
-def verify(query, candidate, response, similarity, context, hook=None):
+def verify(
+    query: str,
+    candidate: str,
+    response: Any,
+    similarity: float,
+    context: Any,
+    hook: Callable[..., Any] | None = None,
+) -> PolicyDecision:
     if context.language != "en" or not query.isascii() or not candidate.isascii():
         return PolicyDecision("abstain", "verification_abstained")
     a, b = query.replace("’", "'"), candidate.replace("’", "'")
