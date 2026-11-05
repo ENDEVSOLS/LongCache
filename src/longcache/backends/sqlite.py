@@ -496,7 +496,9 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                         vector=vector,
                         response=None,
                         created_at=float(row["created_at"]),
-                        expires_at=float(row["expires_at"]) if row["expires_at"] is not None else None,
+                        expires_at=float(row["expires_at"])
+                        if row["expires_at"] is not None
+                        else None,
                         hit_count=int(row["hit_count"]),
                         metadata=meta,
                     )

@@ -382,7 +382,16 @@ class RedisCacheBackend(AbstractCacheBackend):
                     valid_ids = [int(i) for i in raw_ids]
                     for entry_id in valid_ids:
                         key = self._entry_key(entry_id)
-                        pipe.hmget(key, "id", "namespace", "vector", "metadata", "expires_at", "created_at", "hit_count")
+                        pipe.hmget(
+                            key,
+                            "id",
+                            "namespace",
+                            "vector",
+                            "metadata",
+                            "expires_at",
+                            "created_at",
+                            "hit_count",
+                        )
                         pipe.pttl(key)
                     results = pipe.execute()
                     now = time.time()

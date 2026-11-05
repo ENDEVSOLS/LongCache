@@ -536,7 +536,16 @@ class SharedRedisCacheBackend(RedisCacheBackend):
                 valid_ids = [int(i) for i in raw_ids]
                 for entry_id in valid_ids:
                     key = self._entry_key(entry_id)
-                    pipe.hmget(key, "id", "namespace", "vector", "metadata", "commit_seq", "tags", "created_at")
+                    pipe.hmget(
+                        key,
+                        "id",
+                        "namespace",
+                        "vector",
+                        "metadata",
+                        "commit_seq",
+                        "tags",
+                        "created_at",
+                    )
                     pipe.pttl(key)
                 results = pipe.execute()
                 now = time.time()
@@ -551,7 +560,9 @@ class SharedRedisCacheBackend(RedisCacheBackend):
                         continue
                     ns = str(raw_fields[1] or "")
                     if ns not in ns_watermarks:
-                        ns_watermarks[ns] = int(self._client.get(self._namespace_watermark(ns)) or 0)
+                        ns_watermarks[ns] = int(
+                            self._client.get(self._namespace_watermark(ns)) or 0
+                        )
                     if birth <= ns_watermarks[ns]:
                         continue
                     tags_raw = raw_fields[5]
@@ -657,7 +668,7 @@ class SharedRedisCacheBackend(RedisCacheBackend):
     ) -> int:
         import redis
 
-        for _ in range(5):
+        for attempt in range(15):
             before = self.revision()
             count = self._count_live(membership)
             receipt_key = self.ROOT + ":receipt:" + uuid4().hex
@@ -704,6 +715,8 @@ class SharedRedisCacheBackend(RedisCacheBackend):
                 raise CacheOperationError("metadata_capacity")
             if result >= 0:
                 return result
+            if attempt < 14:
+                time.sleep(0.005 * (2 ** min(attempt, 4)))
         raise CacheOperationError("invalidation_conflict")
 
     def delete(self, entry_id: int) -> bool:

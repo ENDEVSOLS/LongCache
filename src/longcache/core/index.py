@@ -330,7 +330,11 @@ class SimilarityIndex:
                 return False
             ratio = self._orphan_count / max(1, raw)
             orphans_diff = raw - len(self._id_map)
-            return bool((ratio >= 0.25 and self._orphan_count >= 64) or self._orphan_count >= 2048 or orphans_diff >= 2048)
+            return bool(
+                (ratio >= 0.25 and self._orphan_count >= 64)
+                or self._orphan_count >= 2048
+                or orphans_diff >= 2048
+            )
 
     @property
     def dimension(self) -> int | None:
