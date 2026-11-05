@@ -657,18 +657,52 @@ class SharedRedisCacheBackend(RedisCacheBackend):
 
     def _count_live(self, key: str) -> int:
         cursor, count = 0, 0
+        global_wm = int(self._client.get(self.ROOT + ":wm:all") or 0)
+        wm_cache: dict[str, int] = {}
+
+        def get_wm(wm_key: str) -> int:
+            if wm_key not in wm_cache:
+                wm_cache[wm_key] = int(self._client.get(wm_key) or 0)
+            return wm_cache[wm_key]
+
         while True:
             cursor, identifiers = self._client.sscan(key, cursor=cursor, count=256)
-            count += sum(self.retrieve(int(identifier)) is not None for identifier in identifiers)
+            if identifiers:
+                pipe = self._client.pipeline(transaction=False)
+                for identifier in identifiers:
+                    ekey = self._entry_key(int(identifier))
+                    pipe.hmget(ekey, "commit_seq", "namespace", "tags")
+                    pipe.pttl(ekey)
+                raw_results = pipe.execute()
+                for i in range(0, len(raw_results), 2):
+                    fields, ttl_ms = raw_results[i], raw_results[i + 1]
+                    if not fields or not fields[0] or ttl_ms == -2 or ttl_ms == 0:
+                        continue
+                    birth = int(fields[0])
+                    if birth <= global_wm:
+                        continue
+                    ns = fields[1]
+                    if ns and birth <= get_wm(self._namespace_watermark(ns)):
+                        continue
+                    tags_raw = fields[2]
+                    if tags_raw:
+                        try:
+                            tags = json.loads(tags_raw)
+                        except Exception:
+                            tags = []
+                        if any(birth <= get_wm(self._tag_watermark(ns or "", t)) for t in tags):
+                            continue
+                    count += 1
             if cursor == 0:
                 return count
 
     def _invalidate(
         self, membership: str, watermark: str, *, partition: str = "", tag_key: str = ""
     ) -> int:
+        import random
         import redis
 
-        for attempt in range(15):
+        for attempt in range(35):
             before = self.revision()
             count = self._count_live(membership)
             receipt_key = self.ROOT + ":receipt:" + uuid4().hex
@@ -715,8 +749,8 @@ class SharedRedisCacheBackend(RedisCacheBackend):
                 raise CacheOperationError("metadata_capacity")
             if result >= 0:
                 return result
-            if attempt < 14:
-                time.sleep(0.005 * (2 ** min(attempt, 4)))
+            if attempt < 34:
+                time.sleep(0.005 * (1.6 ** min(attempt, 8)) + random.uniform(0.002, 0.015))
         raise CacheOperationError("invalidation_conflict")
 
     def delete(self, entry_id: int) -> bool:

@@ -18,7 +18,14 @@ from uuid import uuid4
 
 import numpy as np
 
-from evaluation.cost_model import generate_cost_analysis
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+try:
+    from evaluation.cost_model import generate_cost_analysis
+except ModuleNotFoundError:
+    from cost_model import generate_cost_analysis
 
 
 def _source_hash(root: Path) -> str:

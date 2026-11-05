@@ -1,6 +1,6 @@
 # Support Matrix & API Stability
 
-This document outlines the official platform support, runtime dependencies, and API stability classifications for LongCache **v0.5.0**.
+This document outlines the official platform support, runtime dependencies, and API stability classifications for LongCache **v0.6.0**.
 
 ---
 
@@ -26,7 +26,7 @@ LongCache runs on standard Python environments with no external C compilation re
 | `sqlite` | Persistent (`.longcache/v2/cache.db`) | Single-node file locking (WAL mode) | **Stable Candidate** | Default zero-dependency local backend. Uses schema format 2. |
 | `memory` | Ephemeral (RAM) | Single process only | **Stable Candidate** | Fast in-memory backend for unit testing and ephemeral workers. |
 | `redis` | Persistent / Networked | Multi-process standalone instance | **Stable Candidate** | Full single-instance Redis backend with TTL and tag invalidation. |
-| `redis_shared` | Persistent / Networked | Multi-tenant shared cluster / leases | **Experimental** | Multi-instance singleflight coordination and epoch validation. |
+| `redis_shared` | Persistent / Networked | Multi-tenant shared cluster / leases | **Qualified Candidate** | Multi-instance singleflight coordination and epoch validation; passed v0.6.0 qualification stress and memory bounds. |
 | `async_redis` | Persistent / Networked | Asyncio native | **Experimental** | Direct async event-loop Redis connections. |
 
 ---
