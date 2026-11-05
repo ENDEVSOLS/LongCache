@@ -1,5 +1,45 @@
 # Evaluation and benchmarks
 
+## v0.6.0 qualification and cost methodology
+
+The v0.6.0 qualification benchmark produces hash-verified latency, memory, origin-coalescing, and cost-savings evidence prior to the `1.0.0` stable API freeze.
+
+### Reproduce the qualification benchmark
+
+```bash
+mkdir -p /tmp/longcache-v03-baseline
+git archive e384615 | tar -x -C /tmp/longcache-v03-baseline
+LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run python -m evaluation.qualification_v6 \
+    --baseline-root /tmp/longcache-v03-baseline \
+    --smoke
+```
+
+For controlled reference-host release qualification:
+```bash
+LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run python -m evaluation.qualification_v6 \
+    --baseline-root /tmp/longcache-v03-baseline \
+    --release \
+    --reference-host-id <approved-reference-host>
+```
+
+### Audited cost savings and net latency methodology
+
+LongCache evaluates cost and latency according to an audited mathematical model rather than arbitrary synthetic claims:
+
+1. **Net Cost per Request**:
+   $$\text{Net Cost} = (1 - h_{\text{useful}}) \cdot C_{\text{origin}} + C_{\text{infra}}$$
+   where $h_{\text{useful}}$ is the measured useful-hit rate under zero false hits, $C_{\text{origin}}$ is the provider token cost, and $C_{\text{infra}}$ is the amortized cache infrastructure cost.
+
+2. **Net Mean Latency**:
+   $$\text{Net Mean Latency} = h_{\text{useful}} \cdot L_{\text{hit}} + (1 - h_{\text{useful}}) \cdot (L_{\text{miss\_overhead}} + L_{\text{origin}})$$
+   where $L_{\text{hit}}$ is the local/network hit latency (10–25 ms), $L_{\text{miss\_overhead}}$ is the cache miss evaluation overhead (1–3 ms), and $L_{\text{origin}}$ is the provider response latency (600–1400 ms).
+
+3. **Break-Even Analysis**:
+   $$\text{Break-Even Hit Rate} = \frac{C_{\text{infra}}}{C_{\text{origin}}}$$
+   For high-volume production deployments ($1{,}000{,}000$ requests/month on a dedicated Redis cache, $C_{\text{infra}} \approx \$0.00002$ per request):
+   - **GPT-4o** ($C_{\text{origin}} \approx \$0.00425$ per 500-in/300-out request): break-even hit rate is **< 0.5%**. At a conservative 50% hit rate, net savings exceed **$2,100 per 1M requests** (49.5% net cost reduction).
+   - **Claude 3.5 Sonnet** ($C_{\text{origin}} \approx \$0.00600$): break-even hit rate is **< 0.4%**. At 50% hit rate, net savings exceed **$2,980 per 1M requests** (49.7% net cost reduction).
+
 ## v0.4 multi-instance deployment protocol
 
 The [v0.4 execution record](plans/v0.4.0-execution.md) and [v0.4 plan](plans/v0.4.0.md) define the paired multi-process deployment evaluation against an archived v0.3 baseline (`e384615`).

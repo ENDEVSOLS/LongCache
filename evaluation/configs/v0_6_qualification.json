@@ -1,0 +1,23 @@
+{
+  "protocol": "qualification-v6",
+  "seed": 404,
+  "cache_sizes": [1000, 10000],
+  "indexes": ["flat", "hnsw"],
+  "repeats": 5,
+  "warm_samples_per_repeat": 2000,
+  "minimum_percentile_samples": 10000,
+  "burst_concurrency": 20,
+  "origin_delay_ms": 100,
+  "output": "evaluation/reports/v0_6_qualification",
+  "budgets": {
+    "legacy_warm_p95_multiplier": 1.15,
+    "legacy_warm_p95_add_ms": 1.0,
+    "legacy_warm_p99_multiplier": 1.2,
+    "legacy_warm_p99_add_ms": 2.0,
+    "shared_warm_p95_add_ms": 5.0,
+    "shared_warm_p99_add_ms": 10.0,
+    "shared_visibility_max_ms": 1000.0,
+    "shared_origin_calls": 1,
+    "zero_false_hits": true
+  }
+}
