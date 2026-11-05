@@ -6,6 +6,7 @@ provides a revision that every reader checks before consulting that index.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import hashlib
 from itertools import islice
 import json
@@ -519,6 +520,80 @@ class SharedRedisCacheBackend(RedisCacheBackend):
             if birth <= int(self._client.get(self._tag_watermark(entry.namespace, tag)) or 0):
                 return None
         return entry
+
+    def iter_index_entries(self, batch_size: int = 256) -> Iterator[CacheEntry]:
+        """Yield lightweight entries containing vector and metadata for shared index rebuilds."""
+        self._healthy()
+        cursor = 0
+        global_wm = int(self._client.get(self.ROOT + ":wm:all") or 0)
+        ns_watermarks: dict[str, int] = {}
+        tag_watermarks: dict[str, int] = {}
+
+        while True:
+            cursor, raw_ids = self._client.sscan(self.ALL_IDS, cursor=cursor, count=batch_size)
+            if raw_ids:
+                pipe = self._client.pipeline(transaction=False)
+                valid_ids = [int(i) for i in raw_ids]
+                for entry_id in valid_ids:
+                    key = self._entry_key(entry_id)
+                    pipe.hmget(key, "id", "namespace", "vector", "metadata", "commit_seq", "tags", "created_at")
+                    pipe.pttl(key)
+                results = pipe.execute()
+                now = time.time()
+                for idx, entry_id in enumerate(valid_ids):
+                    raw_fields, ttl_ms = results[idx * 2], results[idx * 2 + 1]
+                    if not raw_fields or raw_fields[0] is None:
+                        continue
+                    if ttl_ms == -2 or ttl_ms == 0:
+                        continue
+                    birth = int(raw_fields[4] or 0)
+                    if birth <= global_wm:
+                        continue
+                    ns = str(raw_fields[1] or "")
+                    if ns not in ns_watermarks:
+                        ns_watermarks[ns] = int(self._client.get(self._namespace_watermark(ns)) or 0)
+                    if birth <= ns_watermarks[ns]:
+                        continue
+                    tags_raw = raw_fields[5]
+                    if tags_raw:
+                        try:
+                            tags = json.loads(tags_raw)
+                        except Exception:
+                            tags = []
+                        is_tag_invalidated = False
+                        for tag in tags:
+                            tag_key = self._tag_watermark(ns, tag)
+                            if tag_key not in tag_watermarks:
+                                tag_watermarks[tag_key] = int(self._client.get(tag_key) or 0)
+                            if birth <= tag_watermarks[tag_key]:
+                                is_tag_invalidated = True
+                                break
+                        if is_tag_invalidated:
+                            continue
+
+                    expires_at = time.time() + ttl_ms / 1000 if ttl_ms > 0 else None
+                    vector = None
+                    if raw_fields[2]:
+                        vector = self._str_to_vector(raw_fields[2])
+                    meta = {}
+                    if raw_fields[3]:
+                        try:
+                            meta = json.loads(raw_fields[3])
+                        except Exception:
+                            pass
+                    yield CacheEntry(
+                        id=entry_id,
+                        namespace=ns,
+                        query="",
+                        vector=vector,
+                        response=None,
+                        created_at=float(raw_fields[6] or now),
+                        expires_at=expires_at,
+                        hit_count=0,
+                        metadata=meta,
+                    )
+            if cursor == 0:
+                break
 
     def validate_hit(self, entry: CacheEntry, *, expected_epoch: int) -> bool:
         if entry.id is None:
