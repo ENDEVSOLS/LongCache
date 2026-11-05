@@ -28,7 +28,9 @@ async def answer(cache, question, snapshot):
 
 
 async def main():
-    redis_url = os.environ["LONGCACHE_TEST_REDIS_URL"]
+    redis_url = os.environ.get("LONGCACHE_TEST_REDIS_URL") or os.environ.get(
+        "REDIS_URL", "redis://localhost:16379/0"
+    )
     config = CacheConfig(
         backend="redis",
         deployment_mode="shared",
