@@ -7,7 +7,7 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
-  logo: assets/logo.png
+  logo: assets/LongCache-logo.png
   favicon: assets/logo.png
   palette:
     - scheme: slate
