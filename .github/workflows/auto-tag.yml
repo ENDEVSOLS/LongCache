@@ -3,6 +3,7 @@ name: Auto Tag on Merge
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   tag:
@@ -39,7 +40,9 @@ jobs:
         if: steps.check_tag.outputs.exists == 'false'
         run: |
           pip install build twine
-          python scripts/verify_release_v6.py
+          python -m build
+          python scripts/generate_sbom_v1.py --dist-dir dist
+          python scripts/verify_release_v1.py --dist-dir dist
 
       - name: Create and push tag
         if: steps.check_tag.outputs.exists == 'false'

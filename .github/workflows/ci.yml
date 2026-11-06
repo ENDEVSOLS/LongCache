@@ -161,8 +161,11 @@ jobs:
       - run: pip install build twine "readme-renderer[md]"
       - run: python -m build
       - run: twine check --strict dist/*
+      - run: python scripts/generate_sbom_v1.py --dist-dir dist
       - name: Check package metadata
-        run: python scripts/check_package_metadata.py
+        run: python scripts/check_package_metadata.py --dist-dir dist
+      - name: Verify release readiness
+        run: python scripts/verify_release_v1.py --dist-dir dist
 
       - uses: actions/upload-artifact@v4
         with:

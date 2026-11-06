@@ -59,15 +59,28 @@ Build and verify the distribution packages:
 rm -rf dist/
 uv run --no-sync python -m build
 uv run --no-sync twine check --strict dist/*
+uv run --no-sync python scripts/generate_sbom_v1.py --dist-dir dist
 uv run --no-sync python scripts/check_package_metadata.py --dist-dir dist
-uv run --no-sync python scripts/verify_release_v6.py --dist-dir dist --check-evidence
+uv run --no-sync python scripts/verify_release_v1.py --dist-dir dist --check-evidence
 ```
 
 This verifies:
 * `src/longcache/py.typed` is present in both `.whl` and `.tar.gz`.
+* Deterministic CycloneDX 1.5 JSON SBOM is generated at `dist/longcache-<version>.sbom.json`.
 * No test cache artifacts (`.pytest_cache`, `__pycache__`, `.longcache`, `*.db`) leaked into the archive.
 * Exact SHA256 checksums are generated in `dist/SHA256SUMS.txt`.
 * The benchmark evidence hash matches the current source tree.
+
+### Verifying Release Artifacts and Provenance
+Users and operators can cryptographically verify downloaded release distributions:
+
+```bash
+# 1. Verify SHA-256 Checksums
+sha256sum -c dist/SHA256SUMS.txt
+
+# 2. Verify GitHub Build Attestations (Sigstore / PEP 740)
+gh attestation verify dist/longcache-1.0.0-py3-none-any.whl --owner ENDEVSOLS
+```
 
 ---
 

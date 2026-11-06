@@ -2,6 +2,17 @@
 
 All notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.0.0rc1] - 2026-11-06
+
+### Added
+
+- **Public API Freeze & Contract Lock:** Frozen public API contract with `API_CONTRACT_VERSION = "1.0"`, automated signature locking against `tests/fixtures/api_contract_v1_0.json`, and package graduation from `Beta` to `Development Status :: 5 - Production/Stable` with `Typing :: Typed`.
+- **Promotion of Qualified Surfaces:** Graduated all `0.5.0` candidate symbols in `PUBLIC_API_STABILITY` from `"stable-candidate"` to `"stable"`, including `SharedRedisCacheBackend` and `SharedCoordinationBackend` following `0.6.0` qualification.
+- **Runtime Warnings for Pass-Through & Experimental Surfaces:** Added `LongCachePassThroughWarning` (emitted on instantiation/use of `CachedLLM`, `CachedChain`, `CachedQueryEngine`, `CachedState`, `StreamingCacheAdapter`, and `cache.cached_stream`) and `LongCacheExperimentalWarning` (emitted on `AsyncRedisCacheBackend`).
+- **Format-2 Persistence Upgrade Guarantee:** Added `tests/test_v1_persistence_compat.py` verifying zero data loss, zero re-indexing, and bit-identical partition digests (`v2:<sha256>`) for upgrading pre-populated SQLite and Redis caches.
+- **Release Provenance & SBOM:** Added deterministic CycloneDX 1.5 JSON SBOM generation (`scripts/generate_sbom_v1.py`), `dist/SHA256SUMS.txt` manifests, and release verification via `scripts/verify_release_v1.py`.
+- **Support & Migration Documentation:** Published `docs/semver-contract.md` (defining the 1.x stability contract) and `docs/migration-v1.0.md` (0.6.0 to 1.0.0 upgrade guide).
+
 ## [0.6.0] - 2026-11-05
 
 ### Added
