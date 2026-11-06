@@ -48,13 +48,23 @@ def verify_release(
     project_data = tomllib.loads(project_file.read_text(encoding="utf-8"))["project"]
     proj_version = project_data["version"]
 
-    sys.path.insert(0, str(root / "src"))
-    import longcache
+    init_file = root / "src" / "longcache" / "__init__.py"
+    pkg_version = None
+    if init_file.exists():
+        match = re.search(
+            r'^__version__\s*=\s*["\']([^"\']+)["\']',
+            init_file.read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        if match:
+            pkg_version = match.group(1)
 
-    if longcache.__version__ != proj_version:
+    if not pkg_version:
+        errors.append(f"Could not parse __version__ from {init_file}")
+    elif pkg_version != proj_version:
         errors.append(
             f"Version mismatch: pyproject.toml has {proj_version!r}, "
-            f"longcache.__version__ has {longcache.__version__!r}"
+            f"longcache.__init__.__version__ has {pkg_version!r}"
         )
 
     # 2. Changelog verification
