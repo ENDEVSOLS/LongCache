@@ -207,7 +207,7 @@ class LongCache:
         if self._metadata_only:
             return
         entries: list[CacheEntry] = []
-        for entry in self._dependency("backend", self.backend.list_all_entries):
+        for entry in self._dependency("backend", self.backend.iter_index_entries):
             metadata = entry.metadata
             if metadata.get("format") != 2 or metadata.get("embedding") != self._fingerprint:
                 continue
@@ -255,6 +255,9 @@ class LongCache:
                                 # Redis validates every candidate at replay. Old vectors
                                 # are harmless until the background index compacts them.
                                 self._shared_compaction_pending = True
+                                if self.index.record_remote_invalidation(1):
+                                    self._rebuild_index_from_backend()
+                                    self._shared_compaction_pending = False
                             else:
                                 complete = False
                                 break

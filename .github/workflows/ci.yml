@@ -78,9 +78,8 @@ jobs:
         if: matrix.python-version == '3.12'
         run: uv run --no-sync python -m evaluation.rag --output evaluation/reports/v0_4_rag.json
 
-      - name: Run two-instance shared Redis example
-        if: matrix.python-version == '3.12'
-        run: uv run --no-sync python examples/multi_instance_rag.py
+      - name: Run all documented examples and quickstarts
+        run: uv run --no-sync python scripts/wheel_examples_v6.py
 
       - name: Smoke deployment benchmark against actual v0.3 source
         if: matrix.python-version == '3.12'
@@ -88,12 +87,6 @@ jobs:
           mkdir -p /tmp/longcache-v03-baseline
           git archive e384615 | tar -x -C /tmp/longcache-v03-baseline
           uv run --no-sync python -m evaluation.deployment --baseline-root /tmp/longcache-v03-baseline --smoke
-
-      - name: Run offline public-interface example
-        run: uv run --no-sync python examples/safe_reuse.py
-
-      - name: Run offline reliability example
-        run: uv run --no-sync python examples/reliability.py
 
       - name: Typecheck consumer against wheel
         run: uv run --no-sync python scripts/wheel_typecheck_v5.py

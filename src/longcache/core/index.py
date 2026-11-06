@@ -306,6 +306,37 @@ class SimilarityIndex:
             return len(self._id_map)
 
     @property
+    def raw_total(self) -> int:
+        """Return the raw vector count in the underlying FAISS index."""
+        with self._lock:
+            return int(self._faiss_index.ntotal) if self._faiss_index is not None else 0
+
+    @property
+    def orphan_count(self) -> int:
+        """Return the count of orphaned vectors awaiting index compaction."""
+        with self._lock:
+            return self._orphan_count
+
+    def record_remote_invalidation(self, count: int = 1) -> bool:
+        """Record remotely invalidated vectors and check if compaction threshold is crossed.
+
+        Returns True if the orphaned vector ratio is >= 25% (with at least 64 orphans)
+        or orphan count >= 2,048.
+        """
+        with self._lock:
+            self._orphan_count += count
+            raw = int(self._faiss_index.ntotal) if self._faiss_index is not None else 0
+            if raw == 0:
+                return False
+            ratio = self._orphan_count / max(1, raw)
+            orphans_diff = raw - len(self._id_map)
+            return bool(
+                (ratio >= 0.25 and self._orphan_count >= 64)
+                or self._orphan_count >= 2048
+                or orphans_diff >= 2048
+            )
+
+    @property
     def dimension(self) -> int | None:
         """Return the dimensionality of the index, or None if not initialized."""
         return self._dimension

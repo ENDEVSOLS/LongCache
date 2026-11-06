@@ -8,6 +8,7 @@ for thread-safe concurrent reads.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import json
 import os
 import sqlite3
@@ -462,6 +463,45 @@ class SQLiteCacheBackend(AbstractCacheBackend):
                 .fetchall()
             )
             return [self._row_to_entry(row) for row in rows]
+
+    def iter_index_entries(self, batch_size: int = 512) -> Iterator[CacheEntry]:
+        """Yield lightweight entries containing vector and metadata for index rebuilds."""
+        with self._lock:
+            conn = self._get_connection()
+            now = time.time()
+            last_id = 0
+            while True:
+                rows = conn.execute(
+                    """
+                    SELECT id, namespace, vector, metadata, expires_at, created_at, hit_count
+                    FROM cache_entries
+                    WHERE id > ? AND (expires_at IS NULL OR expires_at > ?)
+                    ORDER BY id ASC LIMIT ?
+                    """,
+                    (last_id, now, batch_size),
+                ).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    last_id = int(row["id"])
+                    vector = None
+                    if row["vector"]:
+                        vector = np.frombuffer(row["vector"], dtype=np.float32).copy()
+                    raw_meta = row["metadata"]
+                    meta = json.loads(raw_meta) if raw_meta else {}
+                    yield CacheEntry(
+                        id=last_id,
+                        namespace=row["namespace"],
+                        query="",
+                        vector=vector,
+                        response=None,
+                        created_at=float(row["created_at"]),
+                        expires_at=float(row["expires_at"])
+                        if row["expires_at"] is not None
+                        else None,
+                        hit_count=int(row["hit_count"]),
+                        metadata=meta,
+                    )
 
     def update_hit_count(self, entry_id: int) -> None:
         """

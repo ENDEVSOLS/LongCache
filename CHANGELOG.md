@@ -2,6 +2,17 @@
 
 All notable changes are recorded here using [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0] - 2026-11-05
+
+### Added
+
+- **Multi-Process Redis Qualification & Stress Suite:** Added `tests/test_qualification_stress_v6.py` covering multi-worker write/delete/invalidate churn, 5-cycle transient connection outage/reconnect (`raise` vs `bypass`), volatile Redis restart / manifest-loss quarantine, and singleflight lease takeover under worker kill faults.
+- **Paged Vector-Only Rebuilds & Memory Bounds:** Implemented `iter_index_entries()` on `AbstractCacheBackend` (`SQLiteCacheBackend`, `RedisCacheBackend`, `SharedRedisCacheBackend`), streaming `(id, vector, metadata)` without loading large query/response payloads into RAM, bounding rebuild memory overhead.
+- **Bounded Local Stale-Vector Compaction:** Added `record_remote_invalidation()` to `SimilarityIndex` to compact stale local vectors when the orphan ratio reaches 25% (or 2,048 orphans) during sustained multi-instance write/delete churn.
+- **Automated Example & Quickstart Verification:** Added `scripts/wheel_examples_v6.py` and `tests/test_examples_and_migrations_v6.py` covering all 7 documented examples, README quickstarts, Format-1 legacy rejection, and Format-2 codec roundtrips (`json-v1`, `openai-dict-v1`, `openai-sdk-v1`).
+- **Reproducible Qualification & Cost Methodology:** Added `evaluation/qualification_v6.py` and `evaluation/cost_model.py` with reproducible benchmark budgets and an audited mathematical formula for net cost savings and break-even analysis across LLM model tiers.
+- **Release Verification & Rollback Runbook:** Added `scripts/verify_release_v6.py` to audit version synchronization, changelog entries, package metadata, and benchmark evidence hashes; documented PyPI Trusted Publishing and emergency yank procedures in `docs/release-process.md`.
+
 ## [0.5.0] - 2026-11-04
 
 ### Added

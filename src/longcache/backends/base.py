@@ -9,6 +9,7 @@ storage engine.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from typing import Any, Protocol, runtime_checkable
 
 from longcache.core.entry import CacheEntry
@@ -170,6 +171,14 @@ class AbstractCacheBackend(ABC):
     def list_all_entries(self) -> list[CacheEntry]:
         """Enumerate live entries for a validated generation rebuild."""
         ...
+
+    def iter_index_entries(self, batch_size: int = 512) -> Iterator[CacheEntry]:
+        """Yield entries containing at least (id, namespace, vector, metadata) for index rebuilds.
+
+        Default implementation delegates to list_all_entries() for custom third-party backends;
+        built-in SQLite and Redis backends override this with paged, payload-free queries.
+        """
+        yield from self.list_all_entries()
 
     @abstractmethod
     def ensure_manifest(self, manifest: dict[str, Any]) -> None:

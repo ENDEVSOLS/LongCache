@@ -1,6 +1,6 @@
-# Shared Redis deployment (v0.4 development)
+# Shared Redis deployment (v0.6 qualification)
 
-The v0.4 branch adds an opt-in shared Redis mode for processes connected to one writable Redis authority. It is under qualification; the [acceptance map](plans/v0.4.0-acceptance.md) records what has and has not been validated. The default remains `single_process`.
+The v0.6 qualification milestone validates shared Redis mode for processes connected to one writable Redis authority. It has passed multi-process churn, fail-closed Redis crash/data-loss recovery, and bounded memory index rebuilds. The default remains `single_process`.
 
 ```python
 from longcache import CacheConfig, LongCache, RequestContext, RequestScope
@@ -45,6 +45,6 @@ For RAG, retrieve an immutable document snapshot first. Put its exact corpus and
 
 Use a dedicated Redis allocation with a non-evicting policy and capacity headroom. Replica reads, Redis failover, data rollback, Redis Cluster, and automatic server-restart recovery are outside the v0.4 design. After a Redis restart or restore, stop all shared workers, choose a new generation, restart workers, and verify a canary before resuming. Local process restarts rebuild their index from Redis.
 
-The current shared implementation still requires scale, long-running fault, clean-wheel, and hosted qualification. See the [v0.4 plan](plans/v0.4.0.md), [execution record](plans/v0.4.0-execution.md), and [migration guide](migration-v0.4.md).
+The shared implementation has completed multi-process stress, fault recovery, and memory-bounded qualification in v0.6.0. See the [v0.6 benchmarks & cost methodology](benchmarks.md), [release process & runbook](release-process.md), and [support matrix](support-matrix.md).
 
 Run `LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 python examples/multi_instance_rag.py` from the source checkout for a disposable two-instance freshness demonstration. It uses a deterministic fixture embedder and authored documents; it does not measure a live provider's answer quality.

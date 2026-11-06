@@ -35,6 +35,12 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify release readiness
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          pip install build twine
+          python scripts/verify_release_v6.py
+
       - name: Create and push tag
         if: steps.check_tag.outputs.exists == 'false'
         run: |
@@ -65,6 +71,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          PRERELEASE_FLAG=""
+          if echo "${{ steps.version.outputs.version }}" | grep -Eq 'rc|a|b|dev'; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
           gh release create "${{ steps.version.outputs.version }}" \
             --title "${{ steps.version.outputs.version }}" \
-            --notes-file /tmp/release_notes.md
+            --notes-file /tmp/release_notes.md $PRERELEASE_FLAG

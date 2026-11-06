@@ -7,7 +7,7 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
-  logo: assets/logo.png
+  logo: assets/LongCache-logo.png
   favicon: assets/logo.png
   palette:
     - scheme: slate
@@ -82,6 +82,7 @@ nav:
     - Changing-document RAG: integrations/versioned-rag.md
   - Reliability and Upgrade: reliability.md
   - Support Matrix & API Stability: support-matrix.md
+  - Release Process & Runbook: release-process.md
   - Upgrade to v0.5: migration-v0.5.md
   - Shared Redis Deployment (Development): deployment.md
   - v0.4 Implementation Plan: plans/v0.4.0.md

@@ -9,6 +9,7 @@ across instances by this backend.
 from __future__ import annotations
 
 import base64
+from collections.abc import Iterator
 import json
 import threading
 import time
@@ -366,6 +367,70 @@ class RedisCacheBackend(AbstractCacheBackend):
         for namespace in list(self._client.smembers(self.NAMESPACE_SET)):
             entries.extend(self.list_entries(str(namespace)))
         return entries
+
+    def iter_index_entries(self, batch_size: int = 256) -> Iterator[CacheEntry]:
+        """Yield lightweight entries containing vector and metadata for index rebuilds."""
+        namespaces = list(self._client.smembers(self.NAMESPACE_SET))
+        for ns in namespaces:
+            ns_str = str(ns)
+            ns_key = self._namespace_key(ns_str)
+            cursor = 0
+            while True:
+                cursor, raw_ids = self._client.sscan(ns_key, cursor=cursor, count=batch_size)
+                if raw_ids:
+                    pipe = self._client.pipeline(transaction=False)
+                    valid_ids = [int(i) for i in raw_ids]
+                    for entry_id in valid_ids:
+                        key = self._entry_key(entry_id)
+                        pipe.hmget(
+                            key,
+                            "id",
+                            "namespace",
+                            "vector",
+                            "metadata",
+                            "expires_at",
+                            "created_at",
+                            "hit_count",
+                        )
+                        pipe.pttl(key)
+                    results = pipe.execute()
+                    now = time.time()
+                    for idx, entry_id in enumerate(valid_ids):
+                        raw_fields, ttl_ms = results[idx * 2], results[idx * 2 + 1]
+                        if not raw_fields or raw_fields[0] is None:
+                            continue
+                        if ttl_ms == -2 or ttl_ms == 0:
+                            continue
+                        expires_at = None
+                        if raw_fields[4]:
+                            try:
+                                expires_at = float(raw_fields[4])
+                            except (ValueError, TypeError):
+                                pass
+                        if expires_at is not None and expires_at <= now:
+                            continue
+                        vector = None
+                        if raw_fields[2]:
+                            vector = self._str_to_vector(raw_fields[2])
+                        meta = {}
+                        if raw_fields[3]:
+                            try:
+                                meta = json.loads(raw_fields[3])
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                        yield CacheEntry(
+                            id=entry_id,
+                            namespace=str(raw_fields[1] or ns_str),
+                            query="",
+                            vector=vector,
+                            response=None,
+                            created_at=float(raw_fields[5] or now),
+                            expires_at=expires_at,
+                            hit_count=int(raw_fields[6] or 0),
+                            metadata=meta,
+                        )
+                if cursor == 0:
+                    break
 
     def update_hit_count(self, entry_id: int) -> None:
         """

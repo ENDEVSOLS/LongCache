@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ENDEVSOLS/LongCache/main/assets/logo.png" alt="LongCache Logo" width="320"/>
+  <img src="https://github.com/Abdullahbinmushtaq/LongCache/blob/feat/v0.6-qualification/assets/LongCache-logo.png?raw=true" alt="LongCache Logo" width="320">
 </p>
 
-<p align="center"><strong>Semantic similarity cache for LLM and RAG pipelines .</strong></p>
+<p align="center"><strong>Production-grade semantic similarity cache for LLM and RAG pipelines — eliminate repetitive token costs and latency.</strong></p>
 
 <p align="center">
 <a href="https://pypi.org/project/longcache/"><img src="https://img.shields.io/pypi/v/longcache" alt="PyPI Version"></a>
@@ -21,11 +21,9 @@
 <a href="https://github.com/ENDEVSOLS/LongCache/blob/main/CHANGELOG.md"><strong>Changelog</strong></a>
 </p>
 
----
+> *"What is your refund policy?" costs $0.003 the first time. It should cost $0.0000 every time after that.*
 
-## What is LongCache?
-
-**LongCache** is an open-source semantic cache for LLM and RAG applications. Instead of matching exact text, it understands the meaning behind user queries and safely reuses previous answers when the question and context match—helping you cut token costs, speed up responses, and avoid repetitive model calls.
+**LongCache** is a production-grade semantic similarity cache for LLM and RAG pipelines. Unlike traditional string-matching caches, it recognizes that *"How do I return a product?"* and *"What's your return process?"* deserve the same cached answer — and serves it in milliseconds.
 
 
 ---
@@ -885,16 +883,24 @@ longcache/
 │   ├── test_langchain.py
 │   ├── test_middleware.py
 │   ├── test_cli.py
-│   └── test_shared_redis_v4.py   # two-process shared Redis acceptance
+│   ├── test_shared_redis_v4.py          # two-process shared Redis acceptance
+│   ├── test_v06_slice_a.py              # paged vector loading and compaction bounds
+│   ├── test_qualification_stress_v6.py    # multi-process Redis crash/churn stress suite
+│   └── test_examples_and_migrations_v6.py # 0.x migration and example validation
 ├── evaluation/
 │   ├── run.py, rag.py, deployment.py
+│   ├── qualification_v6.py              # v0.6 qualification benchmark runner
+│   ├── cost_model.py                    # audited LLM net cost and latency model
+│   ├── reports/
 │   └── configs/
 └── examples/
     ├── basic_langchain.py
     ├── fastapi_middleware.py
+    ├── multi_instance_rag.py             # two-instance shared Redis freshness demo
     ├── redis_production.py
-    ├── versioned_rag.py
-    └── multi_instance_rag.py      # two-instance shared Redis freshness demo
+    ├── reliability.py                    # singleflight lease and execution reliability
+    ├── safe_reuse.py                     # scoped lookup, inspection, and invalidation
+    └── versioned_rag.py
 ```
 
 ---
@@ -971,6 +977,16 @@ Shared Redis tests are skipped unless `LONGCACHE_TEST_REDIS_URL` points at a dis
 ```bash
 LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run --no-sync pytest tests/test_shared_redis_v4.py -q -rs
 LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run --no-sync python examples/multi_instance_rag.py
+```
+
+### Examples and Release Qualification Verification
+
+```bash
+# Verify all 7 examples and README quickstart workflow
+LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run --no-sync python scripts/wheel_examples_v6.py
+
+# Verify distribution build, hashes, changelog, and qualification benchmark evidence
+uv run --no-sync python scripts/verify_release_v6.py --dist-dir dist --check-evidence
 ```
 
 ---
