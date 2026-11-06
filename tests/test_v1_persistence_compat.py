@@ -14,10 +14,8 @@ import os
 from pathlib import Path
 import sqlite3
 import time
-from typing import Any
 from uuid import uuid4
 
-import numpy as np
 import pytest
 import redis
 
@@ -131,7 +129,9 @@ def test_sqlite_format2_prepopulated_upgrade_without_dataloss(tmp_path: Path):
         "generation": "default",
         "embedding": asdict(embedder.descriptor),
     }
-    conn.execute("INSERT INTO cache_manifest (id, data) VALUES (1, ?)", (canonical(manifest_payload),))
+    conn.execute(
+        "INSERT INTO cache_manifest (id, data) VALUES (1, ?)", (canonical(manifest_payload),)
+    )
 
     scope = RequestScope("acme-corp", "alice")
     ctx = RequestContext(
@@ -149,8 +149,12 @@ def test_sqlite_format2_prepopulated_upgrade_without_dataloss(tmp_path: Path):
     vec_blob = vec.tobytes()
     response_obj = {"revenue": 1000000, "status": "audited"}
     encoded_response = canonical(response_obj)
-    partition = ctx.partition("default", "private", embedder.descriptor.fingerprint, "safe-reuse-v1")
-    identity_str = canonical(ctx.record("default", "private", embedder.descriptor.fingerprint, "safe-reuse-v1"))
+    partition = ctx.partition(
+        "default", "private", embedder.descriptor.fingerprint, "safe-reuse-v1"
+    )
+    identity_str = canonical(
+        ctx.record("default", "private", embedder.descriptor.fingerprint, "safe-reuse-v1")
+    )
 
     entry_meta = {
         "format": 2,
@@ -236,8 +240,12 @@ def test_redis_format2_prepopulated_upgrade_without_dataloss():
     entry_id = 101
     response_obj = {"redis_key": "stored_in_v06"}
     encoded_response = canonical(response_obj)
-    partition = ctx.partition("default", "private", embedder.descriptor.fingerprint, "safe-reuse-v1")
-    identity_str = canonical(ctx.record("default", "private", embedder.descriptor.fingerprint, "safe-reuse-v1"))
+    partition = ctx.partition(
+        "default", "private", embedder.descriptor.fingerprint, "safe-reuse-v1"
+    )
+    identity_str = canonical(
+        ctx.record("default", "private", embedder.descriptor.fingerprint, "safe-reuse-v1")
+    )
 
     entry_meta = {
         "format": 2,
@@ -248,6 +256,7 @@ def test_redis_format2_prepopulated_upgrade_without_dataloss():
 
     # Populate exact Redis hash for entry
     import base64
+
     entry_key = f"{root_key}:entry:{entry_id}"
     client.hset(
         entry_key,

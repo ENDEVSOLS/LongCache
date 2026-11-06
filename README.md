@@ -268,15 +268,15 @@ cache = LongCache(config, context=context)
 
 - ✅ **SQLite Backend:** No external service, WAL mode, versioned manifests, transactional initialization; default backend
 - ✅ **Redis Backend:** Versioned durable response storage with TTL; one LongCache process per generation in default mode
-- 🧪 **Shared Redis Mode (opt-in):** Journal-synchronized local indexes, guarded replay, and distributed singleflight across processes; under qualification
-- ✅ **Async Redis Backend:** Experimental standalone storage interface; unsupported through `LongCache`
+- ✅ **Shared Redis Mode (opt-in):** Journal-synchronized local indexes, guarded replay, and distributed singleflight across processes
+- 🧪 **Async Redis Backend:** Experimental standalone storage interface (emits `LongCacheExperimentalWarning`); unsupported through `LongCache`
 - ✅ **In-Memory Backend:** Zero I/O, ideal for unit tests and CI/CD pipelines
-- ✅ **LangChain Integration:** `CachedLLM` and `CachedChain` compatibility pass-through wrappers
-- ✅ **LangGraph Integration:** `CachedState` compatibility interface; graph state is not cached
-- ✅ **LlamaIndex Integration:** `CachedQueryEngine` preserves the engine interface without caching opaque state
+- ✅ **LangChain Integration:** `CachedLLM` and `CachedChain` compatibility pass-through wrappers (emit `LongCachePassThroughWarning` by default)
+- ✅ **LangGraph Integration:** `CachedState` compatibility pass-through interface; graph state is not cached
+- ✅ **LlamaIndex Integration:** `CachedQueryEngine` compatibility pass-through wrapper; preserves the engine interface without caching opaque state
 - ✅ **OpenAI Integration:** Supported single-turn text requests with explicit context; sync/async dict and SDK replay
 - ✅ **FastAPI Middleware:** Bounded supported chat-completion JSON with trusted scope resolution and diagnostic headers
-- ✅ **CLI:** `longcache stats`, `clear`, `inspect`, `export` — manage the cache without writing code
+- ✅ **CLI:** `longcache stats`, `clear`, `inspect`, `export`, `info` — manage the cache without writing code
 
 ---
 
@@ -345,13 +345,13 @@ with LongCache(config, context=context) as cache:
 | **Index**    | Local FAISS; not synchronized with other processes    | Local FAISS synchronized via Redis journal; journal gaps trigger a rebuild                  |
 | **Coalescing** | Within one process                                  | Across processes via fenced leases (15 s lifetime, 5 s renewal by default)                  |
 | **Requires** | Redis                                                 | Dedicated non-evicting Redis; identical cache ID, generation, embedder, and policy settings |
-| **Status**   | Supported                                             | Development; release qualification open                                                     |
+| **Status**   | Supported (`stable`)                                  | Supported (`stable`)                                                                        |
 
 Shared-mode limits: one Redis authority only. Redis Cluster, Sentinel, failover, and replica reads are out of scope. After a Redis restart or restore, stop all workers, choose a new generation, and run a canary. Callbacks must be safe to repeat, because after a lease expires a new owner may run the origin again. Manual lookup → generate → store calls are not coalesced. Full contract: [shared Redis deployment](docs/deployment.md).
 
 ### Async Redis backend status
 
-`AsyncRedisCacheBackend` can be used and tested as a standalone storage backend (`experimental` tier in `PUBLIC_API_STABILITY`). It is not supported through `LongCache`; selecting `backend="async_redis"` fails immediately. End-to-end async Redis integration is planned for a later release.
+`AsyncRedisCacheBackend` can be used and tested as a standalone storage backend (`experimental` tier in `PUBLIC_API_STABILITY`, emitting `LongCacheExperimentalWarning` on instantiation unless `warn_experimental=False`). It is not supported through `LongCache`; selecting `backend="async_redis"` fails immediately. End-to-end async Redis integration is planned for a later release.
 
 ### In-Memory (Testing & CI)
 
@@ -369,7 +369,7 @@ cache = LongCache(CacheConfig(backend="memory"))
 
 ## Integrations
 
-Generic LangChain, LangGraph, and LlamaIndex adapters below preserve their interfaces as `pass-through` compatibility wrappers (`cache_bypass_reason = "unsupported_request_shape"`). Use the explicit-context manual/decorator path or `CachedOpenAI` / `LongCacheMiddleware` for caching proven application workflows. All streaming helpers also pass through. See the [Support Matrix](docs/support-matrix.md).
+Generic LangChain, LangGraph, and LlamaIndex adapters below preserve their interfaces as `pass-through` compatibility wrappers (`cache_bypass_reason = "unsupported_request_shape"`, `is_passthrough = True`) and emit `LongCachePassThroughWarning` by default (pass `warn_passthrough=False` to silence). Use the explicit-context manual/decorator path or `CachedOpenAI` / `LongCacheMiddleware` for caching proven application workflows. All streaming helpers (`@cache.cached_stream`, `StreamingCacheAdapter`) also pass through. See the [Support Matrix](docs/support-matrix.md) and [1.x SemVer Contract](docs/semver-contract.md).
 
 ### LangChain
 
@@ -883,13 +883,10 @@ longcache/
 │   ├── test_langchain.py
 │   ├── test_middleware.py
 │   ├── test_cli.py
-│   ├── test_shared_redis_v4.py          # two-process shared Redis acceptance
-│   ├── test_v06_slice_a.py              # paged vector loading and compaction bounds
-│   ├── test_qualification_stress_v6.py    # multi-process Redis crash/churn stress suite
-│   └── test_examples_and_migrations_v6.py # 0.x migration and example validation
+│   ├── test_api_freeze_v1.py            # frozen public API signature & contract lock
+│   └── test_v1_persistence_compat.py    # Format-2 persistence compatibility suite
 ├── evaluation/
 │   ├── run.py, rag.py, deployment.py
-│   ├── qualification_v6.py              # v0.6 qualification benchmark runner
 │   ├── cost_model.py                    # audited LLM net cost and latency model
 │   ├── reports/
 │   └── configs/
@@ -975,18 +972,15 @@ LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 LONGCACHE_TEST_MODEL=1 \
 Shared Redis tests are skipped unless `LONGCACHE_TEST_REDIS_URL` points at a disposable Redis 7.2 service. They own only test-prefixed keys and never flush the database:
 
 ```bash
-LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run --no-sync pytest tests/test_shared_redis_v4.py -q -rs
 LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run --no-sync python examples/multi_instance_rag.py
 ```
 
-### Examples and Release Qualification Verification
+### Release Provenance & SBOM Verification
 
 ```bash
-# Verify all 7 examples and README quickstart workflow
-LONGCACHE_TEST_REDIS_URL=redis://localhost:16379/0 uv run --no-sync python scripts/wheel_examples_v6.py
-
-# Verify distribution build, hashes, changelog, and qualification benchmark evidence
-uv run --no-sync python scripts/verify_release_v6.py --dist-dir dist --check-evidence
+# Generate deterministic CycloneDX 1.5 SBOM and verify release artifacts, hashes, and benchmark evidence
+uv run --no-sync python scripts/generate_sbom_v1.py --dist-dir dist
+uv run --no-sync python scripts/verify_release_v1.py --dist-dir dist --check-evidence
 ```
 
 ---

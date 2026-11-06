@@ -109,18 +109,26 @@ def test_stable_classes_signatures_match_contract(api_contract):
     for cls_name, cls in classes.items():
         expected_methods = api_contract["classes"][cls_name]["methods"]
         for method_name, expected in expected_methods.items():
-            assert hasattr(cls, method_name), f"Class {cls_name} missing frozen method {method_name}"
+            assert hasattr(cls, method_name), (
+                f"Class {cls_name} missing frozen method {method_name}"
+            )
             method = getattr(cls, method_name)
             sig = inspect.signature(method)
             actual_params = []
             for p_name, param in sig.parameters.items():
-                default_repr = repr(param.default) if param.default is not inspect.Parameter.empty else None
-                actual_params.append({
-                    "name": p_name,
-                    "kind": param.kind.name,
-                    "default": default_repr,
-                    "annotation": str(param.annotation) if param.annotation is not inspect.Parameter.empty else "Any",
-                })
+                default_repr = (
+                    repr(param.default) if param.default is not inspect.Parameter.empty else None
+                )
+                actual_params.append(
+                    {
+                        "name": p_name,
+                        "kind": param.kind.name,
+                        "default": default_repr,
+                        "annotation": str(param.annotation)
+                        if param.annotation is not inspect.Parameter.empty
+                        else "Any",
+                    }
+                )
             # Verify parameter names and kinds
             expected_params = expected["parameters"]
             assert len(actual_params) == len(expected_params), (

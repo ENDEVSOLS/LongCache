@@ -71,9 +71,13 @@ def verify_release(
     # In 1.0.0 release line, require Production/Stable and Typing :: Typed
     if proj_version.startswith("1."):
         if "Development Status :: 5 - Production/Stable" not in classifiers:
-            errors.append("pyproject.toml missing classifier 'Development Status :: 5 - Production/Stable'")
+            errors.append(
+                "pyproject.toml missing classifier 'Development Status :: 5 - Production/Stable'"
+            )
         if "Development Status :: 4 - Beta" in classifiers:
-            errors.append("pyproject.toml still contains classifier 'Development Status :: 4 - Beta'")
+            errors.append(
+                "pyproject.toml still contains classifier 'Development Status :: 4 - Beta'"
+            )
         if "Typing :: Typed" not in classifiers:
             errors.append("pyproject.toml missing classifier 'Typing :: Typed'")
 
@@ -82,7 +86,9 @@ def verify_release(
     if types_file.exists():
         types_content = types_file.read_text(encoding="utf-8")
         if 'API_CONTRACT_VERSION: Literal["1.0"] = "1.0"' not in types_content:
-            errors.append("src/longcache/core/types.py missing API_CONTRACT_VERSION: Literal['1.0'] = '1.0'")
+            errors.append(
+                "src/longcache/core/types.py missing API_CONTRACT_VERSION: Literal['1.0'] = '1.0'"
+            )
         if '"stable-candidate"' in types_content:
             errors.append("src/longcache/core/types.py still contains 'stable-candidate' tier")
 
@@ -114,7 +120,6 @@ def verify_release(
     if dist_dir and dist_dir.exists():
         wheels = sorted(dist_dir.glob("*.whl"))
         sdists = sorted(dist_dir.glob("*.tar.gz"))
-        sboms = sorted(dist_dir.glob("*.sbom.json"))
 
         if wheels or sdists:
             checksums: list[str] = []

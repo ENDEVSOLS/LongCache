@@ -1,10 +1,12 @@
 """Verify public API surface, parameter cleanliness, and stability classification for v0.5.0."""
 
 import inspect
+from pathlib import Path
 from typing import get_type_hints
 import pytest
 import longcache
 import longcache.backends
+from longcache.backends.async_redis import AsyncRedisCacheBackend
 import longcache.integrations
 from longcache.integrations.langchain import CachedChain, CachedLLM
 from longcache.integrations.langgraph import CachedState
@@ -18,6 +20,10 @@ from longcache import (
 )
 from longcache.backends.base import AbstractCacheBackend
 from longcache.backends.redis_shared import SharedRedisCacheBackend
+from longcache.core.errors import (
+    LongCacheExperimentalWarning,
+    LongCachePassThroughWarning,
+)
 
 
 def test_public_api_stability_classification_completeness():
@@ -88,14 +94,6 @@ def test_longcache_public_methods_are_fully_annotated():
         assert "return" in hints
 
 
-from pathlib import Path
-from longcache.backends.async_redis import AsyncRedisCacheBackend
-from longcache.core.errors import (
-    LongCacheExperimentalWarning,
-    LongCachePassThroughWarning,
-)
-
-
 def test_pass_through_classes_expose_bypass_reason():
     """All pass-through wrapper classes must declare cache_bypass_reason == 'unsupported_request_shape'."""
     for cls in (
@@ -115,31 +113,49 @@ def test_pass_through_classes_expose_bypass_reason():
 
 def test_pass_through_classes_emit_warnings_by_default():
     """Instantiating or invoking pass-through wrappers emits LongCachePassThroughWarning."""
+
     class DummyLLM:
-        def invoke(self, *a, **kw): return "ans"
-        def stream(self, *a, **kw): yield "ans"
+        def invoke(self, *a, **kw):
+            return "ans"
+
+        def stream(self, *a, **kw):
+            yield "ans"
 
     cache = LongCache(CacheConfig(backend="memory"))
 
-    with pytest.warns(LongCachePassThroughWarning, match="CachedLLM is a compatibility pass-through"):
+    with pytest.warns(
+        LongCachePassThroughWarning, match="CachedLLM is a compatibility pass-through"
+    ):
         CachedLLM(DummyLLM(), cache=cache)
 
-    with pytest.warns(LongCachePassThroughWarning, match="CachedChain is a compatibility pass-through"):
+    with pytest.warns(
+        LongCachePassThroughWarning, match="CachedChain is a compatibility pass-through"
+    ):
         CachedChain(DummyLLM(), cache=cache)
 
-    with pytest.warns(LongCachePassThroughWarning, match="CachedQueryEngine is a compatibility pass-through"):
+    with pytest.warns(
+        LongCachePassThroughWarning, match="CachedQueryEngine is a compatibility pass-through"
+    ):
         CachedQueryEngine(DummyLLM(), cache=cache)
 
-    with pytest.warns(LongCachePassThroughWarning, match="StreamingCacheAdapter is a compatibility pass-through"):
+    with pytest.warns(
+        LongCachePassThroughWarning, match="StreamingCacheAdapter is a compatibility pass-through"
+    ):
         StreamingCacheAdapter(cache=cache, stream_func=lambda q: ["chunk"])
 
-    with pytest.warns(LongCachePassThroughWarning, match="cached_stream is a compatibility pass-through"):
+    with pytest.warns(
+        LongCachePassThroughWarning, match="cached_stream is a compatibility pass-through"
+    ):
         cache.cached_stream(lambda q: ["chunk"])
 
-    with pytest.warns(LongCachePassThroughWarning, match="CachedState is a compatibility pass-through"):
+    with pytest.warns(
+        LongCachePassThroughWarning, match="CachedState is a compatibility pass-through"
+    ):
         CachedState.check({"messages": "hi"}, cache=cache)
 
-    with pytest.warns(LongCachePassThroughWarning, match="CachedState is a compatibility pass-through"):
+    with pytest.warns(
+        LongCachePassThroughWarning, match="CachedState is a compatibility pass-through"
+    ):
         CachedState.save({"messages": "hi"}, "response", cache=cache)
 
 
@@ -148,7 +164,8 @@ def test_pass_through_classes_can_silence_warnings():
     import warnings
 
     class DummyLLM:
-        def invoke(self, *a, **kw): return "ans"
+        def invoke(self, *a, **kw):
+            return "ans"
 
     cache = LongCache(CacheConfig(backend="memory"))
     with warnings.catch_warnings():
@@ -168,6 +185,7 @@ def test_async_redis_backend_emits_experimental_warning():
         AsyncRedisCacheBackend(redis_url="redis://localhost:6379/0")
 
     import warnings
+
     with warnings.catch_warnings():
         warnings.simplefilter("error", LongCacheExperimentalWarning)
         AsyncRedisCacheBackend(redis_url="redis://localhost:6379/0", warn_experimental=False)
@@ -181,7 +199,12 @@ def test_support_matrix_matches_public_api_stability():
 
     # Every stable and pass-through symbol must be listed in support-matrix.md
     for symbol, tier in PUBLIC_API_STABILITY.items():
-        if symbol in ("__version__", "PUBLIC_API_STABILITY", "StabilityTier", "API_CONTRACT_VERSION"):
+        if symbol in (
+            "__version__",
+            "PUBLIC_API_STABILITY",
+            "StabilityTier",
+            "API_CONTRACT_VERSION",
+        ):
             continue
         assert symbol in content, f"Symbol {symbol} (tier: {tier}) missing from {doc_path.name}"
 

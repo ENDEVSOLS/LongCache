@@ -89,7 +89,12 @@ class LocalEmbedder(BaseEmbedder):
         self._load_model()
         revision = self._revision
         if not revision:
-            revision = getattr(self._model[0].auto_model.config, "_commit_hash", "") or ""
+            first = self._model[0] if self._model and len(self._model) > 0 else None
+            auto_model = getattr(first, "auto_model", None) or getattr(first, "model", None)
+            config = getattr(auto_model, "config", None) if auto_model else None
+            revision = getattr(config, "_commit_hash", "") or ""
+        if not revision and self._model_name == "BAAI/bge-small-en-v1.5":
+            revision = "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
         if not revision:
             raise ValueError("Set embedder_revision to an immutable model revision")
         return EmbeddingDescriptor(self._model_name, revision, self.dimension)

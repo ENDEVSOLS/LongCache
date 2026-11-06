@@ -79,3 +79,4 @@ Every symbol marked `"stable"` is frozen under the **1.x backward-compatibility 
 * Confirmed tenant-isolation leaks, cross-user privacy issues, or cache-poisoning vulnerabilities receive **immediate patch releases** (`1.0.x`).
 * Patches never wait for a minor release milestone.
 * In the event of a critical persistence flaw, operators will be provided with explicit `generation` rotation instructions to quarantine affected data safely without service interruption.
+

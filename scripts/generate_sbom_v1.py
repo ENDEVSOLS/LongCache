@@ -53,7 +53,11 @@ def generate_sbom(
             p_version = pkg["version"]
             purl = f"pkg:pypi/{p_name}@{p_version}"
 
-            scope = "required" if p_norm in direct_reqs else ("optional" if p_norm in optional_reqs else "transitive")
+            scope = (
+                "required"
+                if p_norm in direct_reqs
+                else ("optional" if p_norm in optional_reqs else "transitive")
+            )
 
             comp: dict = {
                 "type": "library",
@@ -92,11 +96,13 @@ def generate_sbom(
     if dist_dir and dist_dir.is_dir():
         for artifact in sorted(dist_dir.glob("*.whl")) + sorted(dist_dir.glob("*.tar.gz")):
             digest = sha256(artifact.read_bytes()).hexdigest()
-            root_hashes.append({
-                "alg": "SHA-256",
-                "content": digest,
-                "comment": artifact.name,
-            })
+            root_hashes.append(
+                {
+                    "alg": "SHA-256",
+                    "content": digest,
+                    "comment": artifact.name,
+                }
+            )
 
     # Deterministic serial number from name + version
     serial_uuid = uuid5(NAMESPACE_DNS, f"{proj_name}-{proj_version}")
@@ -105,6 +111,7 @@ def generate_sbom(
     timestamp = os.environ.get("SOURCE_DATE_EPOCH", "2026-11-06T00:00:00Z")
     if timestamp.isdigit():
         import datetime
+
         dt = datetime.datetime.fromtimestamp(int(timestamp), tz=datetime.timezone.utc)
         timestamp = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 

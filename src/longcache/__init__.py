@@ -7,7 +7,7 @@ Reuse responses for semantically similar queries when their context matches.
 from longcache.core.cache import LongCache
 from longcache.config import CacheConfig
 
-__version__ = "1.0.0rc1"
+__version__ = "1.0.0"
 from .core.identity import Instruction, RequestContext, RequestScope
 from .core.decision import LookupDecision, StoreDecision, PolicyDecision
 from .core.base_embedder import BaseEmbedder

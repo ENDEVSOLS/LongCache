@@ -8,7 +8,7 @@ edit_uri: edit/main/docs/
 theme:
   name: material
   logo: assets/LongCache-logo.png
-  favicon: assets/logo.png
+  favicon: assets/LongCache-logo.png
   palette:
     - scheme: slate
       primary: cyan
