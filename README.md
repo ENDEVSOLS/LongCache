@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://github.com/ENDEVSOLS/LongCache/blob/main/assets/LongCache-logo.png?raw=true" alt="LongCache Logo" width="320">
+  <img src="https://github.com/Abdullahbinmushtaq/LongCache/blob/feat/v0.6-qualification/assets/LongCache-logo.png?raw=true" alt="LongCache Logo" width="320">
 </p>
 
 <p align="center"><strong>Production-grade semantic similarity cache for LLM and RAG pipelines — eliminate repetitive token costs and latency.</strong></p>
