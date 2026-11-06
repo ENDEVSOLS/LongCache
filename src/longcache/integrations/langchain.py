@@ -1,4 +1,4 @@
-"""Compatibility adapter: opaque langchain state bypasses cache access in v0.2.
+"""Compatibility adapter: opaque langchain state bypasses cache access in v1.0.
 
 Use explicit RequestContext with the manual interface for a proven workflow.
 """
@@ -6,15 +6,19 @@ Use explicit RequestContext with the manual interface for a proven workflow.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+import warnings
 
 from longcache import CacheConfig, LongCache
+from longcache.core.errors import LongCachePassThroughWarning
 
 
 class CachedLLM:
-    """Compatibility adapter; opaque framework state bypasses caching in v0.2."""
+    """Compatibility adapter; opaque framework state bypasses caching in v1.0."""
 
-    cache_bypass_reason = "unsupported_request_shape"
+    api_stability: Literal["pass-through"] = "pass-through"
+    is_passthrough: bool = True
+    cache_bypass_reason: str = "unsupported_request_shape"
 
     def __init__(
         self,
@@ -22,6 +26,7 @@ class CachedLLM:
         cache: Optional[LongCache] = None,
         config: Optional[CacheConfig] = None,
         namespace: str = "langchain",
+        warn_passthrough: bool = True,
     ) -> None:
         """
         Initialize CachedLLM.
@@ -31,7 +36,17 @@ class CachedLLM:
             cache: Existing LongCache instance. Creates a new one if not provided.
             config: CacheConfig for the new cache (ignored if cache is provided).
             namespace: Default namespace for cache entries.
+            warn_passthrough: Whether to emit LongCachePassThroughWarning on initialization.
         """
+        if warn_passthrough:
+            warnings.warn(
+                f"{self.__class__.__name__} is a compatibility pass-through adapter in LongCache 1.0 "
+                f"(reason={self.cache_bypass_reason!r}) and does not cache or reuse responses. "
+                "Use LongCache.get_or_compute() or @cache.cached with an explicit RequestContext "
+                "for verified semantic caching, or pass warn_passthrough=False to silence this warning.",
+                LongCachePassThroughWarning,
+                stacklevel=2,
+            )
         self.llm = llm
         self.cache = cache
         self._namespace = namespace
@@ -108,8 +123,10 @@ class CachedLLM:
 
 
 class CachedChain:
-    """Compatibility adapter; opaque framework state bypasses caching in v0.2."""
+    """Compatibility adapter; opaque framework state bypasses caching in v1.0."""
 
+    api_stability: Literal["pass-through"] = "pass-through"
+    is_passthrough: bool = True
     cache_bypass_reason = "unsupported_request_shape"
 
     def __init__(
@@ -119,6 +136,7 @@ class CachedChain:
         config: Optional[CacheConfig] = None,
         query_key: str = "question",
         namespace: str = "langchain_chain",
+        warn_passthrough: bool = True,
     ) -> None:
         """
         Initialize CachedChain.
@@ -129,7 +147,17 @@ class CachedChain:
             config: CacheConfig for the new cache (ignored if cache is provided).
             query_key: Key to extract from input dict as the cache query.
             namespace: Default namespace for cache entries.
+            warn_passthrough: Whether to emit LongCachePassThroughWarning on initialization.
         """
+        if warn_passthrough:
+            warnings.warn(
+                f"{self.__class__.__name__} is a compatibility pass-through adapter in LongCache 1.0 "
+                f"(reason={self.cache_bypass_reason!r}) and does not cache or reuse responses. "
+                "Use LongCache.get_or_compute() or @cache.cached with an explicit RequestContext "
+                "for verified semantic caching, or pass warn_passthrough=False to silence this warning.",
+                LongCachePassThroughWarning,
+                stacklevel=2,
+            )
         self.chain = chain
         self.cache = cache
         self.query_key = query_key

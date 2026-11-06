@@ -6,9 +6,11 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterat
 from dataclasses import replace
 import inspect
 import json
-from typing import Any
+from typing import Any, Literal
+import warnings
 
 from longcache import CacheConfig, CacheError, LongCache, RequestContext, RequestScope
+from longcache.core.errors import LongCachePassThroughWarning
 from longcache.integrations.openai import prepare_request
 
 Receive = Callable[[], Awaitable[MutableMapping[str, Any]]]
@@ -240,8 +242,10 @@ class LongCacheMiddleware:
 
 
 class StreamingCacheAdapter:
-    """Compatibility pass-through; streaming cache replay is unsupported in v0.2."""
+    """Compatibility pass-through; streaming cache replay is unsupported in v1.0."""
 
+    api_stability: Literal["pass-through"] = "pass-through"
+    is_passthrough: bool = True
     cache_bypass_reason = "unsupported_request_shape"
 
     def __init__(
@@ -250,8 +254,18 @@ class StreamingCacheAdapter:
         stream_func: Callable[..., Any],
         namespace: str = "streaming",
         replay_delay: float = 0,
+        warn_passthrough: bool = True,
         **kwargs: Any,
     ) -> None:
+        if warn_passthrough:
+            warnings.warn(
+                f"{self.__class__.__name__} is a compatibility pass-through adapter in LongCache 1.0 "
+                f"(reason={self.cache_bypass_reason!r}) and does not cache or reuse responses. "
+                "Use LongCache.get_or_compute() or @cache.cached with an explicit RequestContext "
+                "for verified semantic caching, or pass warn_passthrough=False to silence this warning.",
+                LongCachePassThroughWarning,
+                stacklevel=2,
+            )
         self.cache = cache
         self.stream_func = stream_func
 

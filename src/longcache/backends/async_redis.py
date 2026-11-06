@@ -15,11 +15,13 @@ import asyncio
 import base64
 import json
 import time
-from typing import Any, Optional
+from typing import Any, Literal, Optional
+import warnings
 
 import numpy as np
 
 from longcache.core.entry import CacheEntry
+from longcache.core.errors import LongCacheExperimentalWarning
 from longcache.core.types import Float32Vector
 
 
@@ -27,6 +29,8 @@ class AsyncRedisCacheBackend:
     """
     Async Redis-based cache backend for distributed deployments.
     """
+
+    api_stability: Literal["experimental"] = "experimental"
 
     ROOT = "longcache:v2:default:default"
     KEY_PREFIX = ROOT + ":entry"
@@ -39,7 +43,17 @@ class AsyncRedisCacheBackend:
         max_entries: int = 10_000,
         cache_id: str = "default",
         generation: str = "default",
+        warn_experimental: bool = True,
     ):
+        if warn_experimental:
+            warnings.warn(
+                "AsyncRedisCacheBackend is an experimental standalone backend in LongCache 1.0 "
+                "and is not orchestrated through LongCache(config). Use RedisCacheBackend with "
+                "deployment_mode='single_process' or SharedRedisCacheBackend with deployment_mode='shared' "
+                "for stable managed caching, or pass warn_experimental=False to silence this warning.",
+                LongCacheExperimentalWarning,
+                stacklevel=2,
+            )
         try:
             from redis.asyncio import Redis
         except ImportError:
