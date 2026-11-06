@@ -23,7 +23,7 @@ from longcache.backends.redis_shared import SharedRedisCacheBackend
 def test_public_api_stability_classification_completeness():
     """Every symbol exported across public module __all__ lists must be classified."""
     assert isinstance(PUBLIC_API_STABILITY, dict)
-    valid_tiers = {"stable-candidate", "experimental", "pass-through"}
+    valid_tiers = {"stable", "experimental", "pass-through"}
 
     for mod in (
         longcache,
@@ -39,6 +39,7 @@ def test_public_api_stability_classification_completeness():
             assert PUBLIC_API_STABILITY[name] in valid_tiers, (
                 f"Symbol {name!r} has invalid tier: {PUBLIC_API_STABILITY[name]}"
             )
+    assert "stable-candidate" not in set(PUBLIC_API_STABILITY.values())
 
 
 def test_longcache_public_methods_have_no_private_or_legacy_kwargs():

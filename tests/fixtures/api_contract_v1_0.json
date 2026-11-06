@@ -1,0 +1,4620 @@
+{
+  "classes": {
+    "AbstractCacheBackend": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_ONLY",
+              "name": "self"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "VAR_POSITIONAL",
+              "name": "args"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "VAR_KEYWORD",
+              "name": "kwargs"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "clear": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "close": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "delete_by_tag": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tag"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete_namespace": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "ensure_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "dict[str, Any]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "manifest"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "evict_oldest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "count"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "get_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[int]"
+        },
+        "iter_index_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": "512",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "batch_size"
+            }
+          ],
+          "return_annotation": "Iterator[CacheEntry]"
+        },
+        "list_all_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "list_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "read_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "dict[str, Any] | None"
+        },
+        "retrieve": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "CacheEntry | None"
+        },
+        "store": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "CacheEntry",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "sweep_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "update_hit_count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "BaseEmbedder": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_ONLY",
+              "name": "self"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "VAR_POSITIONAL",
+              "name": "args"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "VAR_KEYWORD",
+              "name": "kwargs"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "embed": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "text"
+            }
+          ],
+          "return_annotation": "Float32Vector"
+        },
+        "embed_batch": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "list[str]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "texts"
+            }
+          ],
+          "return_annotation": "Float32Vector"
+        }
+      }
+    },
+    "CacheConfig": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "float",
+              "default": "0.92",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "similarity_threshold"
+            },
+            {
+              "annotation": "int",
+              "default": "3600",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "ttl_seconds"
+            },
+            {
+              "annotation": "int",
+              "default": "10000",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "max_entries"
+            },
+            {
+              "annotation": "str",
+              "default": "'default'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "str",
+              "default": "'BAAI/bge-small-en-v1.5'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "embedder_model"
+            },
+            {
+              "annotation": "BackendName",
+              "default": "'sqlite'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "backend"
+            },
+            {
+              "annotation": "str",
+              "default": "'.longcache/v2/cache.db'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "db_path"
+            },
+            {
+              "annotation": "str",
+              "default": "'redis://localhost:6379/0'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "redis_url"
+            },
+            {
+              "annotation": "bool",
+              "default": "True",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "track_stats"
+            },
+            {
+              "annotation": "bool",
+              "default": "True",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "singleflight_enabled"
+            },
+            {
+              "annotation": "float",
+              "default": "30.0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "singleflight_wait_timeout_seconds"
+            },
+            {
+              "annotation": "int",
+              "default": "1024",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "singleflight_max_inflight"
+            },
+            {
+              "annotation": "int",
+              "default": "256",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "singleflight_max_waiters_per_key"
+            },
+            {
+              "annotation": "ErrorPolicy",
+              "default": "'raise'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "cache_error_policy"
+            },
+            {
+              "annotation": "float",
+              "default": "2.0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "backend_timeout_seconds"
+            },
+            {
+              "annotation": "float",
+              "default": "5.0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "shutdown_timeout_seconds"
+            },
+            {
+              "annotation": "DeploymentMode",
+              "default": "'single_process'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "deployment_mode"
+            },
+            {
+              "annotation": "float",
+              "default": "5.0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "shared_sync_timeout_seconds"
+            },
+            {
+              "annotation": "int",
+              "default": "50000",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "shared_max_entries"
+            },
+            {
+              "annotation": "int",
+              "default": "1024",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "shared_max_leases"
+            },
+            {
+              "annotation": "int",
+              "default": "100000",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "shared_max_receipts"
+            },
+            {
+              "annotation": "int",
+              "default": "50000",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "shared_max_partitions"
+            },
+            {
+              "annotation": "int",
+              "default": "100000",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "shared_max_distinct_tags"
+            },
+            {
+              "annotation": "int",
+              "default": "64",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "shared_max_tags_per_entry"
+            },
+            {
+              "annotation": "int",
+              "default": "256",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "shared_max_tag_chars"
+            },
+            {
+              "annotation": "float",
+              "default": "15.0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "distributed_lease_seconds"
+            },
+            {
+              "annotation": "float",
+              "default": "5.0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "distributed_renew_interval_seconds"
+            },
+            {
+              "annotation": "FaissIndexType",
+              "default": "'flat'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "faiss_index_type"
+            },
+            {
+              "annotation": "int",
+              "default": "32",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "hnsw_m"
+            },
+            {
+              "annotation": "int",
+              "default": "64",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "hnsw_ef_search"
+            },
+            {
+              "annotation": "ScopePolicy",
+              "default": "'private'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "scope_policy"
+            },
+            {
+              "annotation": "str",
+              "default": "'default'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "cache_id"
+            },
+            {
+              "annotation": "str",
+              "default": "'default'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "generation"
+            },
+            {
+              "annotation": "str",
+              "default": "'safe-reuse-v1'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "policy_version"
+            },
+            {
+              "annotation": "int",
+              "default": "8",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "verification_budget"
+            },
+            {
+              "annotation": "int",
+              "default": "16384",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "max_query_chars"
+            },
+            {
+              "annotation": "int",
+              "default": "1048576",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "max_capture_bytes"
+            },
+            {
+              "annotation": "str",
+              "default": "''",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "embedder_revision"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "from_dict": {
+          "parameters": [
+            {
+              "annotation": "Mapping[str, Any]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "data"
+            }
+          ],
+          "return_annotation": "CacheConfig"
+        },
+        "from_env": {
+          "parameters": [
+            {
+              "annotation": "str",
+              "default": "'LONGCACHE_'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "prefix"
+            }
+          ],
+          "return_annotation": "CacheConfig"
+        },
+        "to_dict": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "dict[str, Any]"
+        }
+      }
+    },
+    "CacheEntry": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "id"
+            },
+            {
+              "annotation": "str",
+              "default": "'default'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "str",
+              "default": "''",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "Float32Vector | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "vector"
+            },
+            {
+              "annotation": "Any",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "response"
+            },
+            {
+              "annotation": "float",
+              "default": "<factory>",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "created_at"
+            },
+            {
+              "annotation": "float | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "expires_at"
+            },
+            {
+              "annotation": "int",
+              "default": "0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "hit_count"
+            },
+            {
+              "annotation": "list[str]",
+              "default": "<factory>",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tags"
+            },
+            {
+              "annotation": "dict[str, Any]",
+              "default": "<factory>",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "metadata"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "from_dict": {
+          "parameters": [
+            {
+              "annotation": "Mapping[str, Any]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "data"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "vector_dim"
+            }
+          ],
+          "return_annotation": "CacheEntry"
+        },
+        "increment_hit": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "is_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "to_dict": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "dict[str, Any]"
+        }
+      }
+    },
+    "CachedOpenAI": {
+      "methods": {
+        "__aenter__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "CachedOpenAI"
+        },
+        "__aexit__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "type[BaseException] | None",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exc_type"
+            },
+            {
+              "annotation": "BaseException | None",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exc"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "traceback"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "__enter__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "CachedOpenAI"
+        },
+        "__exit__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "type[BaseException] | None",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exc_type"
+            },
+            {
+              "annotation": "BaseException | None",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exc"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "traceback"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "client"
+            },
+            {
+              "annotation": "LongCache | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "cache"
+            },
+            {
+              "annotation": "CacheConfig | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "config"
+            },
+            {
+              "annotation": "str",
+              "default": "'openai'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "response_codec"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "aclose": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "close": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "EmbeddingDescriptor": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "model"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "revision"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "dimension"
+            },
+            {
+              "annotation": "str",
+              "default": "'text-v1'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "preprocessing"
+            },
+            {
+              "annotation": "str",
+              "default": "'l2-float32-v1'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "normalization"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "InMemoryCacheBackend": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": "10000",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "max_entries"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "clear": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "close": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "delete_by_tag": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tag"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete_namespace": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "ensure_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "dict[str, Any]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "manifest"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "evict_oldest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "count"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "get_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[int]"
+        },
+        "iter_index_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": "512",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "batch_size"
+            }
+          ],
+          "return_annotation": "Iterator[CacheEntry]"
+        },
+        "list_all_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "list_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "read_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "dict[str, Any] | None"
+        },
+        "retrieve": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "Optional[CacheEntry]"
+        },
+        "store": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "CacheEntry",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "sweep_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "update_hit_count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "Instruction": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "InstructionRole",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "role"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "content"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "LongCache": {
+      "methods": {
+        "__aenter__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "LongCache"
+        },
+        "__aexit__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exc_type"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exc"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "traceback"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "__enter__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "LongCache"
+        },
+        "__exit__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exc_type"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exc"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "traceback"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "CacheConfig | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "config"
+            },
+            {
+              "annotation": "BaseEmbedder | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "embedder"
+            },
+            {
+              "annotation": "AdmissionHook | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "admit"
+            },
+            {
+              "annotation": "VerificationHook | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "verifier"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            },
+            {
+              "annotation": "bool",
+              "default": "False",
+              "kind": "KEYWORD_ONLY",
+              "name": "metadata_only"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "aclose": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "float | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "timeout"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "aget": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "aget_or_compute": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "Callable[[], Awaitable[T]]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "compute"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "ttl"
+            },
+            {
+              "annotation": "Sequence[str] | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "tags"
+            }
+          ],
+          "return_annotation": "T"
+        },
+        "alookup": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            }
+          ],
+          "return_annotation": "LookupDecision"
+        },
+        "aset": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "response"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "ttl"
+            },
+            {
+              "annotation": "Sequence[str] | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tags"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            }
+          ],
+          "return_annotation": "StoreDecision"
+        },
+        "cached": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "Callable[..., Any] | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "func"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "ttl"
+            },
+            {
+              "annotation": "Sequence[str] | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "tags"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            },
+            {
+              "annotation": "Callable[..., RequestContext | None] | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context_resolver"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "cached_stream": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "Any",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "func"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "VAR_KEYWORD",
+              "name": "kwargs"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "clear": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "bool",
+              "default": "False",
+              "kind": "KEYWORD_ONLY",
+              "name": "operator"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "close": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "float | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "timeout"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            },
+            {
+              "annotation": "bool",
+              "default": "False",
+              "kind": "KEYWORD_ONLY",
+              "name": "operator"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "get": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "get_or_compute": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "Callable[[], T]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "compute"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "ttl"
+            },
+            {
+              "annotation": "Sequence[str] | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "tags"
+            }
+          ],
+          "return_annotation": "T"
+        },
+        "inspect": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            }
+          ],
+          "return_annotation": "InspectionReport"
+        },
+        "invalidate": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "invalidate_by_tag": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tag"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "lookup": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            }
+          ],
+          "return_annotation": "LookupDecision"
+        },
+        "metrics": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "bool",
+              "default": "False",
+              "kind": "KEYWORD_ONLY",
+              "name": "operator"
+            }
+          ],
+          "return_annotation": "MetricsSnapshot"
+        },
+        "set": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "response"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "ttl"
+            },
+            {
+              "annotation": "Sequence[str] | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tags"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            }
+          ],
+          "return_annotation": "StoreDecision"
+        },
+        "stats": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "namespace"
+            },
+            {
+              "annotation": "bool",
+              "default": "False",
+              "kind": "KEYWORD_ONLY",
+              "name": "operator"
+            }
+          ],
+          "return_annotation": "StatsSnapshot"
+        }
+      }
+    },
+    "LongCacheMiddleware": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "ASGIApp",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "app"
+            },
+            {
+              "annotation": "LongCache | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "cache"
+            },
+            {
+              "annotation": "CacheConfig | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "config"
+            },
+            {
+              "annotation": "str",
+              "default": "'http'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "Iterable[str] | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "cached_routes"
+            },
+            {
+              "annotation": "Iterable[str] | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exclude_namespaces"
+            },
+            {
+              "annotation": "RequestContext | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "context"
+            },
+            {
+              "annotation": "Callable[[MutableMapping[str, Any]], RequestScope | None] | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "scope_resolver"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "aclose": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "LookupDecision": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "LookupOutcome",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "outcome"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "reason"
+            },
+            {
+              "annotation": "Any",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "response"
+            },
+            {
+              "annotation": "float | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "similarity"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            },
+            {
+              "annotation": "float | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "threshold"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "_epoch"
+            },
+            {
+              "annotation": "float | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "_expires_at"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "_shared_epoch"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "inspection": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "InspectionReport"
+        }
+      }
+    },
+    "PolicyDecision": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "PolicyAction",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "action"
+            },
+            {
+              "annotation": "str",
+              "default": "'application_policy'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "reason"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "RedisCacheBackend": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": "'redis://localhost:6379/0'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "redis_url"
+            },
+            {
+              "annotation": "int",
+              "default": "10000",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "max_entries"
+            },
+            {
+              "annotation": "str",
+              "default": "'default'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "cache_id"
+            },
+            {
+              "annotation": "str",
+              "default": "'default'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "generation"
+            },
+            {
+              "annotation": "float",
+              "default": "2.0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "timeout"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "clear": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "close": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "delete_by_tag": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tag"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete_namespace": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "ensure_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "dict[str, Any]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "manifest"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "evict_oldest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "count"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "get_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[int]"
+        },
+        "iter_index_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": "256",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "batch_size"
+            }
+          ],
+          "return_annotation": "Iterator[CacheEntry]"
+        },
+        "list_all_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "list_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "read_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "dict[str, Any] | None"
+        },
+        "retrieve": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "Optional[CacheEntry]"
+        },
+        "store": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "CacheEntry",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "sweep_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "update_hit_count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "RequestContext": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "RequestScope | None",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "scope"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "operation"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "provider"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "provider_scope"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "model"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "prompt_version"
+            },
+            {
+              "annotation": "tuple[Instruction, ...]",
+              "default": "()",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "instructions"
+            },
+            {
+              "annotation": "Mapping[str, Any]",
+              "default": "<factory>",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "generation"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "corpus_version"
+            },
+            {
+              "annotation": "Mapping[str, str]",
+              "default": "<factory>",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "document_versions"
+            },
+            {
+              "annotation": "tuple[str, ...]",
+              "default": "()",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "protected_entities"
+            },
+            {
+              "annotation": "str",
+              "default": "'en'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "language"
+            },
+            {
+              "annotation": "str",
+              "default": "'single-turn-text'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "request_shape"
+            },
+            {
+              "annotation": "str",
+              "default": "'json-v1'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "codec"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "exact_key": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "query"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "sharing"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "embedding"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "policy"
+            }
+          ],
+          "return_annotation": "str"
+        },
+        "partition": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "sharing"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "embedding"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "policy"
+            }
+          ],
+          "return_annotation": "str"
+        },
+        "record": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "sharing"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "embedding"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "policy"
+            }
+          ],
+          "return_annotation": "dict[str, Any]"
+        }
+      }
+    },
+    "RequestScope": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tenant_id"
+            },
+            {
+              "annotation": "str | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "user_id"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "SQLiteCacheBackend": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": "'.longcache/cache.db'",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "db_path"
+            },
+            {
+              "annotation": "int",
+              "default": "10000",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "max_entries"
+            },
+            {
+              "annotation": "float",
+              "default": "2.0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "timeout"
+            }
+          ],
+          "return_annotation": "Any"
+        },
+        "clear": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "close": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "delete_by_tag": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tag"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete_namespace": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "ensure_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "dict[str, Any]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "manifest"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "evict_oldest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "count"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "export_all": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "list[dict[str, Any]]"
+        },
+        "get_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[int]"
+        },
+        "increment_hits": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "increment_misses": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": "0",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "saved_ms"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "iter_index_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": "512",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "batch_size"
+            }
+          ],
+          "return_annotation": "Iterator[CacheEntry]"
+        },
+        "list_all_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "list_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "load_stats": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "dict[str, int]"
+        },
+        "read_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "dict[str, Any] | None"
+        },
+        "retrieve": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "Optional[CacheEntry]"
+        },
+        "store": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "CacheEntry",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "sweep_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "update_hit_count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "SharedRedisCacheBackend": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "VAR_POSITIONAL",
+              "name": "args"
+            },
+            {
+              "annotation": "int",
+              "default": "50000",
+              "kind": "KEYWORD_ONLY",
+              "name": "shared_max_entries"
+            },
+            {
+              "annotation": "int",
+              "default": "1024",
+              "kind": "KEYWORD_ONLY",
+              "name": "shared_max_leases"
+            },
+            {
+              "annotation": "int",
+              "default": "100000",
+              "kind": "KEYWORD_ONLY",
+              "name": "shared_max_receipts"
+            },
+            {
+              "annotation": "int",
+              "default": "50000",
+              "kind": "KEYWORD_ONLY",
+              "name": "shared_max_partitions"
+            },
+            {
+              "annotation": "int",
+              "default": "100000",
+              "kind": "KEYWORD_ONLY",
+              "name": "shared_max_distinct_tags"
+            },
+            {
+              "annotation": "int",
+              "default": "64",
+              "kind": "KEYWORD_ONLY",
+              "name": "shared_max_tags_per_entry"
+            },
+            {
+              "annotation": "int",
+              "default": "256",
+              "kind": "KEYWORD_ONLY",
+              "name": "shared_max_tag_chars"
+            },
+            {
+              "annotation": "float",
+              "default": "15.0",
+              "kind": "KEYWORD_ONLY",
+              "name": "distributed_lease_seconds"
+            },
+            {
+              "annotation": "float",
+              "default": "5.0",
+              "kind": "KEYWORD_ONLY",
+              "name": "distributed_renew_interval_seconds"
+            },
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "VAR_KEYWORD",
+              "name": "kwargs"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "acquire_flight": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "exact_key"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "ttl_ms"
+            }
+          ],
+          "return_annotation": "tuple[str, str | None]"
+        },
+        "clear": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "close": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "delete_by_tag": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "tag"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "delete_namespace": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "ensure_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "dict[str, Any]",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "manifest"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "epoch": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "events": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "start"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "end"
+            },
+            {
+              "annotation": "int",
+              "default": "256",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "limit"
+            }
+          ],
+          "return_annotation": "list[tuple[int, dict[str, Any]]]"
+        },
+        "evict_oldest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "count"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "finish_flight": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "key"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "token"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "outcome"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "flight_active": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "key"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "flight_outcome": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "key"
+            }
+          ],
+          "return_annotation": "str | None"
+        },
+        "get_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[int]"
+        },
+        "iter_index_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": "256",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "batch_size"
+            }
+          ],
+          "return_annotation": "Iterator[CacheEntry]"
+        },
+        "list_all_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "list_entries": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "namespace"
+            }
+          ],
+          "return_annotation": "list[CacheEntry]"
+        },
+        "read_manifest": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "dict[str, Any] | None"
+        },
+        "release_flight": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "key"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "token"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "renew_flight": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "key"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "token"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "ttl_ms"
+            }
+          ],
+          "return_annotation": "bool"
+        },
+        "retrieve": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "CacheEntry | None"
+        },
+        "revision": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "store": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "CacheEntry",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "store_shared": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "CacheEntry",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "KEYWORD_ONLY",
+              "name": "expected_epoch"
+            },
+            {
+              "annotation": "str",
+              "default": "''",
+              "kind": "KEYWORD_ONLY",
+              "name": "lease_key"
+            },
+            {
+              "annotation": "str",
+              "default": "''",
+              "kind": "KEYWORD_ONLY",
+              "name": "lease_token"
+            }
+          ],
+          "return_annotation": "tuple[int, int | None]"
+        },
+        "sweep_expired": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            }
+          ],
+          "return_annotation": "int"
+        },
+        "update_hit_count": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "None"
+        },
+        "validate_hit": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "CacheEntry",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry"
+            },
+            {
+              "annotation": "int",
+              "default": null,
+              "kind": "KEYWORD_ONLY",
+              "name": "expected_epoch"
+            }
+          ],
+          "return_annotation": "bool"
+        }
+      }
+    },
+    "StoreDecision": {
+      "methods": {
+        "__init__": {
+          "parameters": [
+            {
+              "annotation": "Any",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "self"
+            },
+            {
+              "annotation": "StoreOutcome",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "outcome"
+            },
+            {
+              "annotation": "str",
+              "default": null,
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "reason"
+            },
+            {
+              "annotation": "int | None",
+              "default": "None",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "name": "entry_id"
+            }
+          ],
+          "return_annotation": "None"
+        }
+      }
+    }
+  },
+  "cli_commands": {
+    "clear": {
+      "all_partitions": {
+        "default": "False",
+        "is_flag": true,
+        "opts": [
+          "--all"
+        ],
+        "required": false
+      },
+      "context_file": {
+        "default": null,
+        "is_flag": false,
+        "opts": [
+          "--context-file"
+        ],
+        "required": false
+      },
+      "db_path": {
+        "default": "'.longcache/v2/cache.db'",
+        "is_flag": false,
+        "opts": [
+          "--db-path"
+        ],
+        "required": false
+      },
+      "namespace": {
+        "default": "'default'",
+        "is_flag": false,
+        "opts": [
+          "--namespace"
+        ],
+        "required": false
+      },
+      "operator": {
+        "default": "False",
+        "is_flag": true,
+        "opts": [
+          "--operator"
+        ],
+        "required": false
+      },
+      "scope_policy": {
+        "default": "'private'",
+        "is_flag": false,
+        "opts": [
+          "--scope-policy"
+        ],
+        "required": false
+      },
+      "yes": {
+        "default": "False",
+        "is_flag": true,
+        "opts": [
+          "--yes"
+        ],
+        "required": false
+      }
+    },
+    "export": {
+      "context_file": {
+        "default": null,
+        "is_flag": false,
+        "opts": [
+          "--context-file"
+        ],
+        "required": false
+      },
+      "db_path": {
+        "default": "'.longcache/v2/cache.db'",
+        "is_flag": false,
+        "opts": [
+          "--db-path"
+        ],
+        "required": false
+      },
+      "namespace": {
+        "default": "'default'",
+        "is_flag": false,
+        "opts": [
+          "--namespace"
+        ],
+        "required": false
+      },
+      "operator": {
+        "default": "False",
+        "is_flag": true,
+        "opts": [
+          "--operator"
+        ],
+        "required": false
+      },
+      "output": {
+        "default": null,
+        "is_flag": false,
+        "opts": [
+          "--output",
+          "-o"
+        ],
+        "required": false
+      },
+      "output_format": {
+        "default": "'json'",
+        "is_flag": false,
+        "opts": [
+          "--format"
+        ],
+        "required": false
+      },
+      "scope_policy": {
+        "default": "'private'",
+        "is_flag": false,
+        "opts": [
+          "--scope-policy"
+        ],
+        "required": false
+      }
+    },
+    "inspect": {
+      "context_file": {
+        "default": null,
+        "is_flag": false,
+        "opts": [
+          "--context-file"
+        ],
+        "required": false
+      },
+      "db_path": {
+        "default": "'.longcache/v2/cache.db'",
+        "is_flag": false,
+        "opts": [
+          "--db-path"
+        ],
+        "required": false
+      },
+      "namespace": {
+        "default": "'default'",
+        "is_flag": false,
+        "opts": [
+          "--namespace"
+        ],
+        "required": false
+      },
+      "operator": {
+        "default": "False",
+        "is_flag": true,
+        "opts": [
+          "--operator"
+        ],
+        "required": false
+      },
+      "query": {
+        "default": null,
+        "is_flag": false,
+        "opts": [
+          "--query"
+        ],
+        "required": true
+      },
+      "scope_policy": {
+        "default": "'private'",
+        "is_flag": false,
+        "opts": [
+          "--scope-policy"
+        ],
+        "required": false
+      }
+    },
+    "stats": {
+      "context_file": {
+        "default": null,
+        "is_flag": false,
+        "opts": [
+          "--context-file"
+        ],
+        "required": false
+      },
+      "db_path": {
+        "default": "'.longcache/v2/cache.db'",
+        "is_flag": false,
+        "opts": [
+          "--db-path"
+        ],
+        "required": false
+      },
+      "namespace": {
+        "default": "'default'",
+        "is_flag": false,
+        "opts": [
+          "--namespace"
+        ],
+        "required": false
+      },
+      "operator": {
+        "default": "False",
+        "is_flag": true,
+        "opts": [
+          "--operator"
+        ],
+        "required": false
+      },
+      "scope_policy": {
+        "default": "'private'",
+        "is_flag": false,
+        "opts": [
+          "--scope-policy"
+        ],
+        "required": false
+      }
+    }
+  },
+  "contract_version": "1.0",
+  "dataclasses": {
+    "CacheConfig": [
+      {
+        "default": "0.92",
+        "name": "similarity_threshold",
+        "type": "float"
+      },
+      {
+        "default": "3600",
+        "name": "ttl_seconds",
+        "type": "int"
+      },
+      {
+        "default": "10000",
+        "name": "max_entries",
+        "type": "int"
+      },
+      {
+        "default": "'default'",
+        "name": "namespace",
+        "type": "str"
+      },
+      {
+        "default": "'BAAI/bge-small-en-v1.5'",
+        "name": "embedder_model",
+        "type": "str"
+      },
+      {
+        "default": "'sqlite'",
+        "name": "backend",
+        "type": "BackendName"
+      },
+      {
+        "default": "'.longcache/v2/cache.db'",
+        "name": "db_path",
+        "type": "str"
+      },
+      {
+        "default": "'redis://localhost:6379/0'",
+        "name": "redis_url",
+        "type": "str"
+      },
+      {
+        "default": "True",
+        "name": "track_stats",
+        "type": "bool"
+      },
+      {
+        "default": "True",
+        "name": "singleflight_enabled",
+        "type": "bool"
+      },
+      {
+        "default": "30.0",
+        "name": "singleflight_wait_timeout_seconds",
+        "type": "float"
+      },
+      {
+        "default": "1024",
+        "name": "singleflight_max_inflight",
+        "type": "int"
+      },
+      {
+        "default": "256",
+        "name": "singleflight_max_waiters_per_key",
+        "type": "int"
+      },
+      {
+        "default": "'raise'",
+        "name": "cache_error_policy",
+        "type": "ErrorPolicy"
+      },
+      {
+        "default": "2.0",
+        "name": "backend_timeout_seconds",
+        "type": "float"
+      },
+      {
+        "default": "5.0",
+        "name": "shutdown_timeout_seconds",
+        "type": "float"
+      },
+      {
+        "default": "'single_process'",
+        "name": "deployment_mode",
+        "type": "DeploymentMode"
+      },
+      {
+        "default": "5.0",
+        "name": "shared_sync_timeout_seconds",
+        "type": "float"
+      },
+      {
+        "default": "50000",
+        "name": "shared_max_entries",
+        "type": "int"
+      },
+      {
+        "default": "1024",
+        "name": "shared_max_leases",
+        "type": "int"
+      },
+      {
+        "default": "100000",
+        "name": "shared_max_receipts",
+        "type": "int"
+      },
+      {
+        "default": "50000",
+        "name": "shared_max_partitions",
+        "type": "int"
+      },
+      {
+        "default": "100000",
+        "name": "shared_max_distinct_tags",
+        "type": "int"
+      },
+      {
+        "default": "64",
+        "name": "shared_max_tags_per_entry",
+        "type": "int"
+      },
+      {
+        "default": "256",
+        "name": "shared_max_tag_chars",
+        "type": "int"
+      },
+      {
+        "default": "15.0",
+        "name": "distributed_lease_seconds",
+        "type": "float"
+      },
+      {
+        "default": "5.0",
+        "name": "distributed_renew_interval_seconds",
+        "type": "float"
+      },
+      {
+        "default": "'flat'",
+        "name": "faiss_index_type",
+        "type": "FaissIndexType"
+      },
+      {
+        "default": "32",
+        "name": "hnsw_m",
+        "type": "int"
+      },
+      {
+        "default": "64",
+        "name": "hnsw_ef_search",
+        "type": "int"
+      },
+      {
+        "default": "'private'",
+        "name": "scope_policy",
+        "type": "ScopePolicy"
+      },
+      {
+        "default": "'default'",
+        "name": "cache_id",
+        "type": "str"
+      },
+      {
+        "default": "'default'",
+        "name": "generation",
+        "type": "str"
+      },
+      {
+        "default": "'safe-reuse-v1'",
+        "name": "policy_version",
+        "type": "str"
+      },
+      {
+        "default": "8",
+        "name": "verification_budget",
+        "type": "int"
+      },
+      {
+        "default": "16384",
+        "name": "max_query_chars",
+        "type": "int"
+      },
+      {
+        "default": "1048576",
+        "name": "max_capture_bytes",
+        "type": "int"
+      },
+      {
+        "default": "''",
+        "name": "embedder_revision",
+        "type": "str"
+      }
+    ],
+    "CacheEntry": [
+      {
+        "default": "None",
+        "name": "id",
+        "type": "int | None"
+      },
+      {
+        "default": "'default'",
+        "name": "namespace",
+        "type": "str"
+      },
+      {
+        "default": "''",
+        "name": "query",
+        "type": "str"
+      },
+      {
+        "default": "None",
+        "name": "vector",
+        "type": "Float32Vector | None"
+      },
+      {
+        "default": "None",
+        "name": "response",
+        "type": "Any"
+      },
+      {
+        "default": null,
+        "name": "created_at",
+        "type": "float"
+      },
+      {
+        "default": "None",
+        "name": "expires_at",
+        "type": "float | None"
+      },
+      {
+        "default": "0",
+        "name": "hit_count",
+        "type": "int"
+      },
+      {
+        "default": null,
+        "name": "tags",
+        "type": "list[str]"
+      },
+      {
+        "default": null,
+        "name": "metadata",
+        "type": "dict[str, Any]"
+      }
+    ],
+    "EmbeddingDescriptor": [
+      {
+        "default": null,
+        "name": "model",
+        "type": "str"
+      },
+      {
+        "default": null,
+        "name": "revision",
+        "type": "str"
+      },
+      {
+        "default": null,
+        "name": "dimension",
+        "type": "int"
+      },
+      {
+        "default": "'text-v1'",
+        "name": "preprocessing",
+        "type": "str"
+      },
+      {
+        "default": "'l2-float32-v1'",
+        "name": "normalization",
+        "type": "str"
+      }
+    ],
+    "Instruction": [
+      {
+        "default": null,
+        "name": "role",
+        "type": "InstructionRole"
+      },
+      {
+        "default": null,
+        "name": "content",
+        "type": "str"
+      }
+    ],
+    "LookupDecision": [
+      {
+        "default": null,
+        "name": "outcome",
+        "type": "LookupOutcome"
+      },
+      {
+        "default": null,
+        "name": "reason",
+        "type": "str"
+      },
+      {
+        "default": "None",
+        "name": "response",
+        "type": "Any"
+      },
+      {
+        "default": "None",
+        "name": "similarity",
+        "type": "float | None"
+      },
+      {
+        "default": "None",
+        "name": "entry_id",
+        "type": "int | None"
+      },
+      {
+        "default": "None",
+        "name": "threshold",
+        "type": "float | None"
+      },
+      {
+        "default": "None",
+        "name": "_epoch",
+        "type": "int | None"
+      },
+      {
+        "default": "None",
+        "name": "_expires_at",
+        "type": "float | None"
+      },
+      {
+        "default": "None",
+        "name": "_shared_epoch",
+        "type": "int | None"
+      }
+    ],
+    "PolicyDecision": [
+      {
+        "default": null,
+        "name": "action",
+        "type": "PolicyAction"
+      },
+      {
+        "default": "'application_policy'",
+        "name": "reason",
+        "type": "str"
+      }
+    ],
+    "RequestContext": [
+      {
+        "default": null,
+        "name": "scope",
+        "type": "RequestScope | None"
+      },
+      {
+        "default": null,
+        "name": "operation",
+        "type": "str"
+      },
+      {
+        "default": null,
+        "name": "provider",
+        "type": "str"
+      },
+      {
+        "default": null,
+        "name": "provider_scope",
+        "type": "str"
+      },
+      {
+        "default": null,
+        "name": "model",
+        "type": "str"
+      },
+      {
+        "default": null,
+        "name": "prompt_version",
+        "type": "str"
+      },
+      {
+        "default": "()",
+        "name": "instructions",
+        "type": "tuple[Instruction, ...]"
+      },
+      {
+        "default": null,
+        "name": "generation",
+        "type": "Mapping[str, Any]"
+      },
+      {
+        "default": "None",
+        "name": "corpus_version",
+        "type": "str | None"
+      },
+      {
+        "default": null,
+        "name": "document_versions",
+        "type": "Mapping[str, str]"
+      },
+      {
+        "default": "()",
+        "name": "protected_entities",
+        "type": "tuple[str, ...]"
+      },
+      {
+        "default": "'en'",
+        "name": "language",
+        "type": "str"
+      },
+      {
+        "default": "'single-turn-text'",
+        "name": "request_shape",
+        "type": "str"
+      },
+      {
+        "default": "'json-v1'",
+        "name": "codec",
+        "type": "str"
+      }
+    ],
+    "RequestScope": [
+      {
+        "default": null,
+        "name": "tenant_id",
+        "type": "str"
+      },
+      {
+        "default": "None",
+        "name": "user_id",
+        "type": "str | None"
+      }
+    ],
+    "StoreDecision": [
+      {
+        "default": null,
+        "name": "outcome",
+        "type": "StoreOutcome"
+      },
+      {
+        "default": null,
+        "name": "reason",
+        "type": "str"
+      },
+      {
+        "default": "None",
+        "name": "entry_id",
+        "type": "int | None"
+      }
+    ]
+  },
+  "exceptions": {
+    "CacheCapacityError": [
+      "CacheError",
+      "RuntimeError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "CacheClosedError": [
+      "CacheError",
+      "RuntimeError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "CacheError": [
+      "RuntimeError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "CacheOperationError": [
+      "CacheError",
+      "RuntimeError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "CacheShutdownTimeoutError": [
+      "CacheError",
+      "RuntimeError",
+      "TimeoutError",
+      "OSError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "LongCacheExperimentalWarning": [
+      "LongCacheWarning",
+      "UserWarning",
+      "Warning",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "LongCachePassThroughWarning": [
+      "LongCacheWarning",
+      "UserWarning",
+      "Warning",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "LongCacheWarning": [
+      "UserWarning",
+      "Warning",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "SingleflightCapacityError": [
+      "SingleflightError",
+      "CacheError",
+      "RuntimeError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "SingleflightError": [
+      "CacheError",
+      "RuntimeError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "SingleflightInvalidatedError": [
+      "SingleflightError",
+      "CacheError",
+      "RuntimeError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "SingleflightLeaderError": [
+      "SingleflightError",
+      "CacheError",
+      "RuntimeError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "SingleflightReentrancyError": [
+      "SingleflightError",
+      "CacheError",
+      "RuntimeError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "SingleflightTimeoutError": [
+      "SingleflightError",
+      "CacheError",
+      "RuntimeError",
+      "TimeoutError",
+      "OSError",
+      "Exception",
+      "BaseException",
+      "object"
+    ]
+  },
+  "modules_exports": {
+    "longcache": [
+      "__version__",
+      "API_CONTRACT_VERSION",
+      "StabilityTier",
+      "LongCache",
+      "CacheConfig",
+      "Instruction",
+      "RequestContext",
+      "RequestScope",
+      "LookupDecision",
+      "StoreDecision",
+      "PolicyDecision",
+      "BaseEmbedder",
+      "EmbeddingDescriptor",
+      "CacheEntry",
+      "AdmissionHook",
+      "VerificationHook",
+      "ContextResolver",
+      "ScopeResolver",
+      "CachedCallable",
+      "InspectionReport",
+      "StatsSnapshot",
+      "ResourceSnapshot",
+      "MetricsSnapshot",
+      "ScopePolicy",
+      "BackendName",
+      "DeploymentMode",
+      "ErrorPolicy",
+      "FaissIndexType",
+      "InstructionRole",
+      "ResponseCodec",
+      "LookupOutcome",
+      "StoreOutcome",
+      "PolicyAction",
+      "HealthStatus",
+      "Float32Vector",
+      "PUBLIC_API_STABILITY",
+      "CacheError",
+      "CacheClosedError",
+      "CacheShutdownTimeoutError",
+      "CacheCapacityError",
+      "CacheOperationError",
+      "SingleflightError",
+      "SingleflightTimeoutError",
+      "SingleflightCapacityError",
+      "SingleflightLeaderError",
+      "SingleflightReentrancyError",
+      "SingleflightInvalidatedError",
+      "LongCacheWarning",
+      "LongCachePassThroughWarning",
+      "LongCacheExperimentalWarning"
+    ],
+    "longcache.backends": [
+      "AbstractCacheBackend",
+      "SQLiteCacheBackend",
+      "InMemoryCacheBackend",
+      "get_redis_backend"
+    ],
+    "longcache.integrations": [
+      "CachedLLM",
+      "CachedChain",
+      "get_llamaindex_wrapper",
+      "get_openai_wrapper"
+    ],
+    "longcache.middleware": [
+      "LongCacheMiddleware",
+      "StreamingCacheAdapter"
+    ]
+  },
+  "stability_tiers": {
+    "API_CONTRACT_VERSION": "stable",
+    "AbstractCacheBackend": "stable",
+    "AdmissionHook": "stable",
+    "AsyncRedisCacheBackend": "experimental",
+    "BackendName": "stable",
+    "BaseEmbedder": "stable",
+    "CacheCapacityError": "stable",
+    "CacheClosedError": "stable",
+    "CacheConfig": "stable",
+    "CacheEntry": "stable",
+    "CacheError": "stable",
+    "CacheOperationError": "stable",
+    "CacheShutdownTimeoutError": "stable",
+    "CachedCallable": "stable",
+    "CachedChain": "pass-through",
+    "CachedLLM": "pass-through",
+    "CachedOpenAI": "stable",
+    "CachedQueryEngine": "pass-through",
+    "CachedState": "pass-through",
+    "ContextResolver": "stable",
+    "DeploymentMode": "stable",
+    "EmbeddingDescriptor": "stable",
+    "ErrorPolicy": "stable",
+    "FaissIndexType": "stable",
+    "Float32Vector": "stable",
+    "HealthStatus": "stable",
+    "InMemoryCacheBackend": "stable",
+    "InspectionReport": "stable",
+    "Instruction": "stable",
+    "InstructionRole": "stable",
+    "LongCache": "stable",
+    "LongCache.cached_stream": "pass-through",
+    "LongCacheExperimentalWarning": "stable",
+    "LongCacheMiddleware": "stable",
+    "LongCachePassThroughWarning": "stable",
+    "LongCacheWarning": "stable",
+    "LookupDecision": "stable",
+    "LookupOutcome": "stable",
+    "MetricsSnapshot": "stable",
+    "PUBLIC_API_STABILITY": "stable",
+    "PolicyAction": "stable",
+    "PolicyDecision": "stable",
+    "RedisCacheBackend": "stable",
+    "RequestContext": "stable",
+    "RequestScope": "stable",
+    "ResourceSnapshot": "stable",
+    "ResponseCodec": "stable",
+    "SQLiteCacheBackend": "stable",
+    "ScopePolicy": "stable",
+    "ScopeResolver": "stable",
+    "SharedCoordinationBackend": "stable",
+    "SharedRedisCacheBackend": "stable",
+    "SingleflightCapacityError": "stable",
+    "SingleflightError": "stable",
+    "SingleflightInvalidatedError": "stable",
+    "SingleflightLeaderError": "stable",
+    "SingleflightReentrancyError": "stable",
+    "SingleflightTimeoutError": "stable",
+    "StabilityTier": "stable",
+    "StatsSnapshot": "stable",
+    "StoreDecision": "stable",
+    "StoreOutcome": "stable",
+    "StreamingCacheAdapter": "pass-through",
+    "VerificationHook": "stable",
+    "__version__": "stable",
+    "get_llamaindex_wrapper": "pass-through",
+    "get_openai_wrapper": "stable",
+    "get_redis_backend": "stable"
+  }
+}

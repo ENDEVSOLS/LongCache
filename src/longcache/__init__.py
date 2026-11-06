@@ -7,13 +7,14 @@ Reuse responses for semantically similar queries when their context matches.
 from longcache.core.cache import LongCache
 from longcache.config import CacheConfig
 
-__version__ = "0.6.0"
+__version__ = "1.0.0rc1"
 from .core.identity import Instruction, RequestContext, RequestScope
 from .core.decision import LookupDecision, StoreDecision, PolicyDecision
 from .core.base_embedder import BaseEmbedder
 from .core.embedding_contract import EmbeddingDescriptor
 from .core.entry import CacheEntry
 from .core.types import (
+    API_CONTRACT_VERSION,
     AdmissionHook,
     BackendName,
     CachedCallable,
@@ -33,6 +34,7 @@ from .core.types import (
     ResponseCodec,
     ScopePolicy,
     ScopeResolver,
+    StabilityTier,
     StatsSnapshot,
     StoreOutcome,
     VerificationHook,
@@ -49,10 +51,15 @@ from .core.errors import (
     SingleflightLeaderError,
     SingleflightReentrancyError,
     SingleflightInvalidatedError,
+    LongCacheWarning,
+    LongCachePassThroughWarning,
+    LongCacheExperimentalWarning,
 )
 
 __all__ = [
     "__version__",
+    "API_CONTRACT_VERSION",
+    "StabilityTier",
     "LongCache",
     "CacheConfig",
     "Instruction",
@@ -97,4 +104,7 @@ __all__ = [
     "SingleflightLeaderError",
     "SingleflightReentrancyError",
     "SingleflightInvalidatedError",
+    "LongCacheWarning",
+    "LongCachePassThroughWarning",
+    "LongCacheExperimentalWarning",
 ]
