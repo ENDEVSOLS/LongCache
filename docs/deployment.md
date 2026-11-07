@@ -1,6 +1,6 @@
-# Shared Redis deployment (v0.6 qualification)
+# Shared Redis deployment (`stable` in v1.0.0)
 
-The v0.6 qualification milestone validates shared Redis mode for processes connected to one writable Redis authority. It has passed multi-process churn, fail-closed Redis crash/data-loss recovery, and bounded memory index rebuilds. The default remains `single_process`.
+Qualified in v0.6.0 and promoted to `stable` in v1.0.0, shared Redis mode connects multiple processes to one writable Redis authority. It has passed multi-process churn, fail-closed Redis crash/data-loss recovery, and bounded memory index rebuilds. The default remains `single_process`.
 
 ```python
 from longcache import CacheConfig, LongCache, RequestContext, RequestScope

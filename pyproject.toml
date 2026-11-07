@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "longcache"
-version = "0.6.0"
+version = "1.0.0"
 description = "Semantic similarity cache for LLM/RAG pipelines"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ authors = [
     { name = "ENDEVSOLS", email = "technology@endevsols.com" },
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -22,6 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
 ]
 
 dependencies = [
@@ -113,6 +114,10 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::longcache.core.errors.LongCachePassThroughWarning",
+    "ignore::longcache.core.errors.LongCacheExperimentalWarning",
+]
 
 [tool.ruff]
 line-length = 100

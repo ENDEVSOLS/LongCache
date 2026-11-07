@@ -49,3 +49,15 @@ class SingleflightReentrancyError(SingleflightError):
 
 class SingleflightInvalidatedError(SingleflightError):
     """Explicit invalidation fenced the shared result."""
+
+
+class LongCacheWarning(UserWarning):
+    """Base warning category for LongCache runtime advisories."""
+
+
+class LongCachePassThroughWarning(LongCacheWarning):
+    """Emitted when a compatibility pass-through wrapper is used without active caching."""
+
+
+class LongCacheExperimentalWarning(LongCacheWarning):
+    """Emitted when an experimental standalone component is instantiated."""

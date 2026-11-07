@@ -11,6 +11,7 @@ import inspect
 import threading
 import time
 from typing import Any, Awaitable, Callable, ParamSpec, TypeVar, cast, overload
+import warnings
 
 from longcache.backends.memory import InMemoryCacheBackend
 from longcache.backends.sqlite import SQLiteCacheBackend
@@ -22,7 +23,7 @@ from .distributed_singleflight import DistributedExecution
 from .embedder import LocalEmbedder
 from .embedding_contract import EmbeddingGuard, validate_vector
 from .entry import CacheEntry
-from .errors import CacheClosedError, CacheOperationError
+from .errors import CacheClosedError, CacheOperationError, LongCachePassThroughWarning
 from .execution import Execution
 from .identity import RequestContext, canonical, digest
 from .index import SimilarityIndex
@@ -967,6 +968,15 @@ class LongCache:
 
     def cached_stream(self, func: Any = None, **kwargs: Any) -> Any:
         # Preserve the generator interface while unsupported replay remains pass-through.
+        warn_passthrough = kwargs.pop("warn_passthrough", True)
+        if warn_passthrough:
+            warnings.warn(
+                "LongCache.cached_stream is a compatibility pass-through decorator in LongCache 1.0 "
+                "(reason='unsupported_request_shape') and does not cache or reuse streaming responses. "
+                "Use @cache.cached with non-streaming calls, or pass warn_passthrough=False to silence this warning.",
+                LongCachePassThroughWarning,
+                stacklevel=2,
+            )
         return func if func is not None else lambda fn: fn
 
     def inspect(

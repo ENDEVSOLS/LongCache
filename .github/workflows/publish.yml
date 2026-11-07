@@ -8,6 +8,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  attestations: write
 
 jobs:
   pypi-publish:
@@ -30,13 +31,22 @@ jobs:
       - name: Build binary wheel and source tarball
         run: python -m build
 
+      - name: Generate CycloneDX SBOM
+        run: python scripts/generate_sbom_v1.py --dist-dir dist
+
       - name: Check package distribution
         run: |
           twine check --strict dist/*
           python scripts/check_package_metadata.py --dist-dir dist
-          python scripts/verify_release_v6.py --dist-dir dist
+          python scripts/verify_release_v1.py --dist-dir dist
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "dist/*"
 
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+          attestations: true

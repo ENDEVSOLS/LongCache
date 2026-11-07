@@ -63,7 +63,7 @@
 | `shared_max_tag_chars` | `256` |
 | `distributed_lease_seconds`, `distributed_renew_interval_seconds` | `15.0`, `5.0` |
 
-Legacy `model`, `system_prompt`, `temperature`, and `track_miss` parameters were removed in v0.5.0; supply execution identity explicitly via `RequestContext`. See [Upgrading to v0.5](migration-v0.5.md) and the [Support Matrix](support-matrix.md) for public API stability classifications (`PUBLIC_API_STABILITY`).
+Legacy `model`, `system_prompt`, `temperature`, and `track_miss` parameters were removed in v0.5.0; supply execution identity explicitly via `RequestContext`. In v1.0.0 (`API_CONTRACT_VERSION = "1.0"`), all qualified public interfaces are promoted to `"stable"` in `PUBLIC_API_STABILITY`, while compatibility pass-through shims emit `LongCachePassThroughWarning` and standalone experimental backends emit `LongCacheExperimentalWarning` (both subclasses of `LongCacheWarning(UserWarning)`). See [Upgrading to v1.0](migration-v1.0.md), the [1.x SemVer Contract](semver-contract.md), and the [Support Matrix](support-matrix.md) for full stability classifications.
 
 ## Policy and embedding interfaces
 
