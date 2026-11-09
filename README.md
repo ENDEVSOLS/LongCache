@@ -985,6 +985,21 @@ uv run --no-sync python scripts/verify_release_v1.py --dist-dir dist --check-evi
 
 ---
 
+## Part of the Long Suite
+
+LongCache is part of the **Long Suite** — a collection of tools for building, testing, and monitoring production RAG systems.
+
+| Project | Description |
+|---|---|
+| **[LongParser](https://github.com/ENDEVSOLS/LongParser)** | Document ingestion and chunking |
+| **[LongTrainer](https://github.com/ENDEVSOLS/Long-Trainer)** | RAG chatbot framework |
+| **[LongGuard](https://github.com/ENDEVSOLS/LongGuard)** | In-flight circuit breaker and reasoning loop recovery for agents |
+| **[LongCache](https://github.com/ENDEVSOLS/LongCache)** | Semantic similarity cache for LLM and RAG pipelines *(you are here)* |
+| **[LongTracer](https://github.com/ENDEVSOLS/LongTracer)** | Hallucination detection and tracing |
+| **[LongProbe](https://github.com/ENDEVSOLS/LongProbe)** | Retrieval regression testing |
+
+---
+
 ## License
 
 MIT
